@@ -12,7 +12,7 @@ bgen is a simple utility that allows you to generate a single bash script from m
 
 ## Usage
 
-Put [`bgen`](./bin/bgen) in the same folder as a [`meta.sh`[(#the-metash-file)] file in your project and run:
+Put [`bgen`](./bin/bgen) in the same folder as a [`meta.sh`](#the-metash-file) file in your project and run:
 
 ```bash
 # Output the generated file to stdout
