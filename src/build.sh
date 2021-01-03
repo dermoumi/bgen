@@ -39,22 +39,25 @@ build_project_to_stdout() {
 }
 
 read_project_meta() {
-    local meta_file="meta.sh"
+    local meta_filename="meta.sh"
+    local meta_file_path=""
 
     # shellcheck disable=SC2154
-    if [[ -f "$PWD/$meta_file" ]]; then
-        meta_file="$PWD/$meta_file"
-    elif [[ -f "$__dir__/$meta_file" ]]; then
-        meta_file="$__dir__/$meta_file"
-    else
-        bail "could not file: '$meta_file'"
+    if [[ -f "$PWD/$meta_filename" ]]; then
+        meta_file_path="$PWD/$meta_filename"
+    elif [[ -f "$__dir__/$meta_filename" ]]; then
+        meta_file_path="$__dir__/$meta_filename"
     fi
 
     local meta_dir
-    meta_dir=$(dirname "$meta_file")
+    if [[ -e "$meta_file_path" ]]; then
+        meta_dir=$(dirname "$meta_file_path")
 
-    # shellcheck disable=SC1090
-    source "$meta_file"
+        # shellcheck disable=SC1090
+        source "$meta_file_path"
+    else
+        meta_dir="$PWD"
+    fi
 
     # get project name
     local bgen_project_name
