@@ -16,6 +16,13 @@ build_project() {
     local output_file=
     read_project_meta
 
+    # make sure the output's directory exists
+    local output_dir
+    output_dir=$(dirname "$output_file")
+    if [[ "$output_dir" && "$output_dir" != "." ]]; then
+        mkdir -p "$output_dir"
+    fi
+
     # copy it to the real output dir and make it executable
     cp "$tmp_file" "$output_file"
     chmod +x "$output_file"
