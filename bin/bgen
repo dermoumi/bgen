@@ -40,7 +40,11 @@ __file__="${__dir__}/$(basename "${__process__}")"
 # shellcheck disable=SC2034,SC2015
 __base__="$(basename "${__file__}" .sh)"
 # shellcheck disable=SC2034,SC2015
-__invocation__="$(printf %q "${__file__}")$(printf ' %q' "$@")"
+if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+    __invocation__="${__BGEN_PIPE_SOURCE__}"
+else
+    __invocation__="$(printf %q "${__file__}")"
+fi
 
 # Define the environment variables (and their defaults) that this script depends on
 LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
@@ -73,6 +77,13 @@ build_project() {
     # shellcheck disable=SC1007
     local output_file=
     read_project_meta
+
+    # make sure the output's directory exists
+    local output_dir
+    output_dir=$(dirname "$output_file")
+    if [[ "$output_dir" && "$output_dir" != "." ]]; then
+        mkdir -p "$output_dir"
+    fi
 
     # copy it to the real output dir and make it executable
     cp "$tmp_file" "$output_file"
@@ -205,7 +216,11 @@ echo_header() {
 			# shellcheck disable=SC2034,SC2015
 			__base__="$(basename "${__file__}" .sh)"
 			# shellcheck disable=SC2034,SC2015
-			__invocation__="$(printf %q "${__file__}")$(printf ' %q' "$@")"
+			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+			    __invocation__="${__BGEN_PIPE_SOURCE__}"
+			else
+			    __invocation__="$(printf %q "${__file__}")"
+			fi
 			
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
@@ -397,8 +412,8 @@ is_file_marked_imported() {
 
 
 run_project() {
-    export __BGEN_PIPE_SOURCE__="$0"
-    build_project_to_stdout | bash -s "$@"
+    export __BGEN_PIPE_SOURCE__="$0 run"
+    build_project_to_stdout | bash -s -- "$@"
 }
 
 

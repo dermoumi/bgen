@@ -40,7 +40,11 @@ __file__="${__dir__}/$(basename "${__process__}")"
 # shellcheck disable=SC2034,SC2015
 __base__="$(basename "${__file__}" .sh)"
 # shellcheck disable=SC2034,SC2015
-__invocation__="$(printf %q "${__file__}")$(printf ' %q' "$@")"
+if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+    __invocation__="${__BGEN_PIPE_SOURCE__}"
+else
+    __invocation__="$(printf %q "${__file__}")"
+fi
 
 # Define the environment variables (and their defaults) that this script depends on
 LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
