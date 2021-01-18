@@ -93,8 +93,8 @@ read_project_meta() {
     fi
 
     # get shebang string
-    if [[ "${shebang_string+x}" ]]; then
-        shebang_string="${bgen_shebang_string:-"#!/bin/bash"}"
+    if is_declared shebang_string; then
+        shebang_string="${bgen_shebang_string:-"#!/usr/bin/env bash"}"
     fi
 
     # get output file
