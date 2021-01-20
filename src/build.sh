@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 bgen:import utils
 
@@ -13,7 +13,7 @@ build_project() {
     build_project_to_stdout >"$tmp_file"
 
     # shellcheck disable=SC1007
-    local output_file=
+    local output_file
     read_project_meta
 
     # make sure the output's directory exists
@@ -29,22 +29,36 @@ build_project() {
 }
 
 build_project_to_stdout() {
+    # used later to keep track of whether a file was imported or not
+    # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
-    # shellcheck disable=SC1007
-    local project_name= header_file= entrypoint_file= entrypoint_func= shebang_string=
+    local project_name header_file entrypoint_file entrypoint_func shebang_string imports_dir
     read_project_meta
 
     # build the project
-    output=$(
-        echo_header
-        process_file "$entrypoint_file"
-        echo_entrypoint_call
-    )
-
-    echo "$output"
+    echo_header
+    process_file "$entrypoint_file"
+    echo_entrypoint_call
 }
 
+build_tests_to_stdout() {
+    # used later to keep track of whether a file was imported or not
+    # declared here to be on the biggest private scope it's needed in
+    local imported_files=()
+
+    local project_name header_file tests_dir shebang_string imports_dir
+    read_project_meta
+
+    # build the tests file
+    echo_header
+    for file in "$tests_dir"/*; do
+        [[ -f "$file" ]] || continue
+        process_file "$file"
+    done
+}
+
+# shellcheck disable=SC2034
 read_project_meta() {
     local meta_filename="meta.sh"
     local meta_file_path=""
@@ -73,22 +87,22 @@ read_project_meta() {
     else
         bgen_project_name=$(basename "$meta_dir")
     fi
-    if [[ "${project_name+x}" ]]; then
+    if is_declared project_name; then
         project_name="$bgen_project_name"
     fi
 
     # get header file
-    if [[ "${header_file+x}" ]]; then
+    if is_declared header_file; then
         header_file="${bgen_header_file:-}"
     fi
 
     # get entrypoint file
-    if [[ "${entrypoint_file+x}" ]]; then
+    if is_declared entrypoint_file; then
         entrypoint_file="${bgen_entrypoint_file:-"$meta_dir/src/main.sh"}"
     fi
 
     # get entrypoint func
-    if [[ "${entrypoint_func+x}" ]]; then
+    if is_declared entrypoint_func; then
         entrypoint_func="${bgen_entrypoint_func:-}"
     fi
 
@@ -98,8 +112,18 @@ read_project_meta() {
     fi
 
     # get output file
-    if [[ "${output_file+x}" ]]; then
+    if is_declared output_file; then
         output_file="${bgen_output_file:-"$meta_dir/bin/$bgen_project_name"}"
+    fi
+
+    # tests dir
+    if is_declared tests_dir; then
+        tests_dir="${bgen_tests_dir:-"$meta_dir/tests"}"
+    fi
+
+    # imports dir
+    if is_declared imports_dir; then
+        imports_dir="${bgen_imports_dir:-"$meta_dir/deps"}"
     fi
 }
 
@@ -226,6 +250,15 @@ bgen_import() {
     # Check if there exists a file with `.sh` appended to it
     [[ -f "${file}.sh" ]] && file="${file}.sh"
 
+    # Check in import directories
+    for dir in "${imports_dir[@]}"; do
+        if [[ -f "$dir/$file" ]]; then
+            file="$dir/$file"
+        elif [[ -f "$dir/${file}.sh" ]]; then
+            file="$dir/${file}.sh"
+        fi
+    done
+
     # Raise error if file does not exit
     if [[ ! -f "$file" ]]; then
         bail "bgen:import error: cannot import $file"
@@ -292,4 +325,10 @@ is_file_marked_imported() {
     done
 
     return 1
+}
+
+# Utility function to check if any of the passed variables is not declared
+# @param    variable_name...    names of variables to check
+is_declared() {
+    declare -p "$@" >/dev/null 2>/dev/null
 }

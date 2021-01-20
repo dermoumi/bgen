@@ -16,6 +16,8 @@ if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
     __process__="$__BGEN_PIPE_SOURCE__"
 elif [[ "${BASH_SOURCE+x}" ]]; then
     __process__="${BASH_SOURCE[0]}"
+else
+    __process__="$0"
 fi
 
 if [[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then

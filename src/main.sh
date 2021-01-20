@@ -1,19 +1,32 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 bgen:import build
 bgen:import run
+bgen:import test
 
 # entrypoint
 main() {
     local cmd="${1:-}"
 
     if [[ "$cmd" == "build" ]]; then
-        shift
         build_project
         return
-    elif [[ "$cmd" == "run" ]]; then
+    fi
+
+    if [[ "$cmd" == "run" ]]; then
         shift
         run_project "$@"
+        return
+    fi
+
+    if [[ "$cmd" == "debug" ]]; then
+        shift
+        debug_project "$@"
+        return
+    fi
+
+    if [[ "$cmd" == "test" ]]; then
+        test_project
         return
     fi
 
