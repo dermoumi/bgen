@@ -3,6 +3,20 @@
 __test_failed=()
 __test_report=()
 
+if [[ "$NO_COLOR" ]]; then
+    __COL_DANGER=""
+    __COL_SUCCESS=""
+    __COL_TITLE=""
+    __COL_FILENAME=""
+    __COL_RESET=""
+else
+    __COL_DANGER="\e[31m"
+    __COL_SUCCESS="\e[32m"
+    __COL_TITLE="\e[36m"
+    __COL_FILENAME="\e[33m"
+    __COL_RESET="\e[0m"
+fi
+
 # shellcheck disable=SC2120
 __get_source_line() {
     local stack="${1:-0}"
@@ -23,7 +37,7 @@ __get_source_line() {
         line_nr=$((current_line_nr + 1))
     done <<<"$__BGEN_LINEMAP__"
 
-    echo "${line_file/$PWD\//}:$((bgen_line - line_nr)):"
+    printf '%b%s%b\n' "$__COL_DANGER" "${line_file/$PWD\//}:$((bgen_line - line_nr)):" "$__COL_RESET"
 }
 export -f __get_source_line
 
@@ -89,24 +103,23 @@ __run_test() {
     ) || err="$?"
 
     if [[ ! "$err" ]]; then
-        printf "."
+        printf "%b.%b" "$__COL_SUCCESS" "$__COL_RESET"
         return
     fi
 
     if [[ -s "$stdout_file" || -s "$stderr_file" ]]; then
         local report
         report=$(
-            echo
-            echo "----- $test_func -----"
+            printf '\n%b----- %s ----- %b\n' "$__COL_FILENAME" "$test_func" "$__COL_RESET"
 
             if [[ -s "$stdout_file" ]]; then
-                echo "stdout:"
+                printf "%bstdout:%b\n" "$__COL_TITLE" "$__COL_RESET"
                 cat "$stdout_file"
                 echo
             fi
 
             if [[ -s "$stderr_file" ]]; then
-                echo "stderr:"
+                printf "%bstderr:%b\n" "$__COL_TITLE" "$__COL_RESET"
                 cat "$stderr_file"
                 echo
             fi
@@ -116,7 +129,7 @@ __run_test() {
 
     __test_failed+=("$test_func")
 
-    printf "F"
+    printf "%bF%b" "$__COL_DANGER" "$__COL_RESET"
     return
 }
 
@@ -126,8 +139,7 @@ done
 echo
 
 if (("${#__test_failed[@]}")); then
-    echo
-    echo "failed tests:"
+    printf "\n%bFailed tests:%b\n" "$__COL_TITLE" "$__COL_RESET"
     for test_func in "${__test_failed[@]}"; do
         echo "    $test_func"
     done
