@@ -30,5 +30,10 @@ main() {
         return
     fi
 
+    if [[ "$cmd" == "test-debug" ]]; then
+        test_debug_project
+        return
+    fi
+
     build_project_to_stdout
 }

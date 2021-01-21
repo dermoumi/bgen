@@ -96,6 +96,7 @@ build_project_to_stdout() {
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
+    local included_scripts=()
 
     local project_name header_file entrypoint_file entrypoint_func shebang_string imports_dir
     read_project_meta
@@ -110,15 +111,43 @@ build_tests_to_stdout() {
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
+    local included_scripts=()
 
     local project_name header_file tests_dir shebang_string imports_dir
     read_project_meta
 
+    local jq_query='.Stmts[]
+        | select(.Cmd.Type == "FuncDecl" and (.Cmd.Name.Value | test("^(test_|before_all$|after_all$)"; "i")))
+        | .Cmd.Name.Value'
+
     # build the tests file
     echo_header
-    for file in "$tests_dir"/*; do
-        [[ -f "$file" ]] || continue
-        process_file "$file"
+    for test_file in "$tests_dir"/*; do
+        [[ -f "$test_file" ]] || continue
+        process_file "$test_file"
+
+        local testfile="${test_file/$tests_dir\//}"
+        local testfuncs=($( shfmt -tojson <"$test_file" | jq -Mr "$jq_query"))
+
+        if [[ " ${testfuncs[*]} " == *" before_all "* ]]; then
+            echo "echo '$testfile::before_all'"
+            echo "before_all"
+            echo
+        fi
+
+        for func in "${testfuncs[@]}"; do
+            [[ "$func" =~ ^(before|after)_all$ ]] && continue
+
+            echo "echo '$testfile::$func'"
+            echo "$func"
+            echo
+        done
+
+        if [[ " ${testfuncs[*]} " == *" after_all "* ]]; then
+            echo "echo '$testfile::after_all'"
+            echo "after_all"
+            echo
+        fi
     done
 }
 
@@ -294,9 +323,6 @@ process_file() {
         echo "$line"
     done <"$file"
 
-    # Add some spacing
-    printf '\n\n'
-
     popd >/dev/null || exit
 }
 
@@ -361,36 +387,50 @@ process_directive() {
     esac
 }
 
+find_source_file() {
+    local file="${1:-}"
+
+    # Check if there exists a file with `.sh` appended to it
+    if [[ -f "${file}.sh" ]]; then
+        echo "${file}.sh"
+        return
+    fi
+
+    # Check in import directories
+    for dir in "${imports_dir[@]}"; do
+        if [[ -f "$dir/$file" ]]; then
+            echo "$dir/$file"
+            return
+        fi
+        if [[ -f "$dir/${file}.sh" ]]; then
+            echo "$dir/${file}.sh"
+            return
+        fi
+    done
+}
+
 bgen_import() {
     local file="${1:-}"
     if [[ ! "$file" ]]; then
         bail "bgen:import requires 1 parameter (filename)"
     fi
 
-    # Check if there exists a file with `.sh` appended to it
-    [[ -f "${file}.sh" ]] && file="${file}.sh"
-
-    # Check in import directories
-    for dir in "${imports_dir[@]}"; do
-        if [[ -f "$dir/$file" ]]; then
-            file="$dir/$file"
-        elif [[ -f "$dir/${file}.sh" ]]; then
-            file="$dir/${file}.sh"
-        fi
-    done
-
     # Raise error if file does not exit
-    if [[ ! -f "$file" ]]; then
-        bail "bgen:import error: cannot import $file"
+    source_file=$(find_source_file "${1:-}")
+    if [[ ! -f "$source_file" ]]; then
+        bail "bgen:import error: cannot import '$file'"
     fi
 
     # Don't re-import file if it was already imported
-    if ! is_file_marked_imported "$file"; then
+    if ! is_in_array "$(realpath "$source_file")" "${imported_files[@]}"; then
         # Mark file as imported
-        mark_file_imported "$file"
+        imported_files+=("$(realpath "$source_file")")
 
         # Do normal file processing
-        process_file "$file"
+        process_file "$source_file"
+
+        # Add some spacing
+        printf '\n\n'
     fi
 
     # Return 200 to tell check() that we've processed something
@@ -427,21 +467,12 @@ bgen_include_str() {
     return 200
 }
 
-mark_file_imported() {
-    local file="$1"
-    file=$(realpath "$file")
+is_in_array() {
+    local target="$1"
+    shift
 
-    imported_files+=("$file")
-}
-
-is_file_marked_imported() {
-    local file="$1"
-    file=$(realpath "$file")
-
-    for imported_file in "${imported_files[@]}"; do
-        if [[ "$imported_file" == "$file" ]]; then
-            return 0
-        fi
+    for item in "$@"; do
+        [[ "$target" == "$item" ]] && return 0
     done
 
     return 1
@@ -465,32 +496,18 @@ debug_project() {
 }
 
 
+test_debug_project() {
+    # TODO: Check for shfmt and jq
+
+    export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
+    build_tests_to_stdout
+}
+
 test_project() {
     # TODO: Check for shfmt and jq
 
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
-    eval "$(build_tests_to_stdout)"
-
-    local jq_query='.Stmts[]
-        | select(.Cmd.Type == "FuncDecl" and (.Cmd.Name.Value | test("^test_"; "i")))
-        | .Cmd.Name.Value'
-
-    local tests_dir
-    read_project_meta
-
-    if [[ ! -d "$tests_dir" ]]; then
-        echo "tests directory '${tests_dir/$PWD\//}' does not exist" >&2
-        return 1
-    fi
-
-    for test_file in "$tests_dir"/*; do
-        [[ -f "$test_file" ]] || continue
-
-        for func in $(shfmt -tojson <"$test_file" | jq -Mr "$jq_query"); do
-            echo "${test_file/$tests_dir\//}::$func"
-            "$func"
-        done
-    done
+    bash -c "$(build_tests_to_stdout)" "${__base__:-$0} test" "$@"
 }
 
 
@@ -520,9 +537,12 @@ main() {
         return
     fi
 
+    if [[ "$cmd" == "test-debug" ]]; then
+        test_debug_project
+        return
+    fi
+
     build_project_to_stdout
 }
-
-
 [[ "$__main__" ]] && main "$@"
 
