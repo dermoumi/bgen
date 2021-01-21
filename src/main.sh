@@ -26,12 +26,14 @@ main() {
     fi
 
     if [[ "$cmd" == "test" ]]; then
-        test_project
+        shift
+        test_project "$@"
         return
     fi
 
     if [[ "$cmd" == "test-debug" ]]; then
-        test_debug_project
+        shift
+        test_debug_project "$@"
         return
     fi
 

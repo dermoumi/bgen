@@ -19,27 +19,61 @@ fi
 
 # shellcheck disable=SC2120
 __get_source_line() {
-    local stack="${1:-0}"
+    local bgen_line="$1"
 
-    local bgen_line
-    bgen_line=$((1 + ${BASH_LINENO[$((stack + 1))]}))
-
-    local line_file=
+    local line_file="UNKNOWN_FILE"
     local line_nr=0
     while IFS= read -r line; do
         local current_line_nr
-        current_line_nr=$(awk '$2 == "BGEN__BEGIN" {printf $1}' <<<"$line")
+        current_line_nr="$(awk '$2 == "BGEN__BEGIN" {printf $1}' <<<"$line")"
 
         [[ "$current_line_nr" ]] || continue
-        ((bgen_line > current_line_nr)) || continue
+        ((bgen_line < current_line_nr)) && break
 
-        line_file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }')"
-        line_nr=$((current_line_nr + 1))
+        line_file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }' <<<"$line")"
+        line_nr=$((current_line_nr))
     done <<<"$__BGEN_LINEMAP__"
 
-    printf '%b%s%b\n' "$__COL_DANGER" "${line_file/$PWD\//}:$((bgen_line - line_nr)):" "$__COL_RESET"
+    echo "${line_file/$PWD\//}:$((bgen_line - line_nr))"
 }
 export -f __get_source_line
+
+__handle_error() {
+    local rc="$1"
+    local line="$2"
+
+    __error_handled=1
+
+    local source_line
+    source_line="$(__get_source_line "$line")"
+    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+
+    exit "$1"
+}
+export -f __handle_error
+
+__handle_exit() {
+    local rc="$1"
+
+    if [[ "${__error_handled:-}" ]]; then
+        exit "$rc"
+    fi
+
+    # workaround for bash <4.0 returning 0 on nounset errors
+    if [[ "$rc" == 0 ]]; then
+        [[ "${__func_finished_successfully:-}" ]] && exit 0
+
+        # this is the same code bash returns on version 4+ in these cases
+        rc=127
+    fi
+
+    local source_line
+    source_line="$(__get_source_line $((BASH_LINENO[0] + 1)))"
+    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+
+    exit "$rc"
+}
+export -f __handle_exit
 
 assert_status() {
     local status_code="$?"
@@ -49,9 +83,8 @@ assert_status() {
 
     [[ "$status_code" == "$expected_code" ]] && return 0
 
-    __get_source_line >&2
-    echo "Expected status code to be $expected_code, got: $status_code" >&2
-    exit 1
+    echo "assert_status: expected $expected_code, got $status_code" >&2
+    return 1
 }
 export -f assert_status
 
@@ -62,15 +95,13 @@ assert_eq() {
     [[ "$left" == "$right" ]] && return 0
 
     (   
-        __get_source_line
-        echo "Expected left string to match right string."
-        echo "Left:"
+        echo "assert_eq expected:"
         echo "$left"
         echo
-        echo "Right:"
+        echo "assert_eq got:"
         echo "$right"
     ) >&2
-    exit 1
+    return 1
 }
 export -f assert_eq
 
@@ -86,23 +117,23 @@ __run_test() {
     # shellcheck disable=SC2064
     trap "rm '$stderr_file'" EXIT
 
-    local err=""
+    set +o errexit +o errtrace +o nounset +o pipefail
     (   
-        # Exit on error. Append "|| true" if you expect an error.
-        set -o errexit
-        # Exit on error inside any functions or subshells.
-        set -o errtrace
-        # Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
-        set -o nounset
-        # Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
-        set -o pipefail
-        # Turn on traces, useful for debugging. Set _XTRACE to enable
-        [[ "${_XTRACE:-}" ]] && set -o xtrace
+        trap '__handle_error "$?" "$LINENO"' ERR
+        trap '__handle_exit "$?" "$LINENO"' EXIT
+        set -o errexit -o errtrace -o nounset -o pipefail
 
-        "$test_func" >"$stdout_file" 2>"$stderr_file"
-    ) || err="$?"
+        "$test_func"
 
-    if [[ ! "$err" ]]; then
+        # workaround to check if function didn't end prematurely
+        # bash 3.2 exists with rc=0 on unset variables :/
+        __func_finished_successfully=1
+    ) >"$stdout_file" 2>"$stderr_file"
+    local err=$?
+    local err=1
+    set -o errexit -o errtrace -o nounset -o pipefail
+
+    if [[ "$err" == 0 ]]; then
         printf "%b.%b" "$__COL_SUCCESS" "$__COL_RESET"
         return
     fi
@@ -133,7 +164,8 @@ __run_test() {
     return
 }
 
-for __test_func in $( declare -F | awk '$3 ~ /^ *test_/ {printf "%s\n", $3}'); do
+# look over test functions
+for __test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
     __run_test "$__test_func"
 done
 echo

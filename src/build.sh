@@ -50,18 +50,65 @@ build_tests_to_stdout() {
     local project_name header_file tests_dir shebang_string imports_dir
     read_project_meta
 
-    local jq_query='.Stmts[]
-        | select(.Cmd.Type == "FuncDecl" and (.Cmd.Name.Value | test("^(test_|before_all$|after_all$)"; "i")))
-        | .Cmd.Name.Value'
+    # make sure tests directory exists
+    if ! [[ -d "$tests_dir" ]]; then
+        echo "tests directory '$tests_dir' does not exist" >&2
+        exit 1
+    fi
+
+    local test_files=()
+    local test_funcs=()
+    local failed=
+    while (($#)); do
+        case "$1" in
+        -k)
+            test_funcs+=("$2")
+            shift 2
+            ;;
+        -k=*)
+            test_funcs+=("${1/-k=/}")
+            shift
+            ;;
+        *)
+            local file="$1"
+            shift
+
+            if [[ -f "$file" ]]; then
+                test_files+=("$file")
+                continue
+            fi
+
+            echo "test file '$file' does not exist" >&2
+            failed=1
+            ;;
+        esac
+    done
+
+    if [[ "$failed" ]]; then
+        exit 1
+    elif ! ((${#test_files[@]})); then
+        test_files=("$tests_dir"/*)
+    fi
 
     # build the tests file
     echo_header
-    for test_file in "$tests_dir"/*; do
+    for test_file in "${test_files[@]}"; do
         [[ -f "$test_file" ]] || continue
-        bgen_import "$test_file"
+
+        bgen_import "$test_file" || { check && true; }
     done
 
+    echo "__BGEN_TEST_FUNCS__=("
+    if ((${#test_funcs[@]})); then
+        printf '    %q\n' "${test_funcs[@]}"
+    else
+        # shellcheck disable=SC2028
+        echo "\$(declare -F | awk '\$3 ~ /^ *test_/ {printf \"%s\n\", \$3}')"
+    fi
+    echo ")"
+
     bgen:include_str testlib "testlib.sh"
+    # shellcheck disable=SC2154
     echo "$testlib"
 }
 
@@ -286,7 +333,7 @@ bgen_import() {
     fi
 
     # Don't re-import file if it was already imported
-    if ! is_in_array "$(realpath "$source_file")" "${imported_files[@]}"; then
+    if ! is_in_array "$(realpath "$source_file")" "${imported_files[@]-}"; then
         # Mark file as imported
         imported_files+=("$(realpath "$source_file")")
 

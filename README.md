@@ -47,7 +47,7 @@ bgen_entrypoint_file=
 bgen_entrypoint_func=
 
 # string to use as a shebang for the output file
-# if left empty, bgen uses `#!/bin/bash`
+# if left empty, bgen uses `#!/usr/bin/env bash`
 bgen_shebang_string=
 
 # file to output the generated project to
