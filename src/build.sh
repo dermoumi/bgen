@@ -58,31 +58,11 @@ build_tests_to_stdout() {
     echo_header
     for test_file in "$tests_dir"/*; do
         [[ -f "$test_file" ]] || continue
-        process_file "$test_file"
-
-        local testfile="${test_file/$tests_dir\//}"
-        local testfuncs=($( shfmt -tojson <"$test_file" | jq -Mr "$jq_query"))
-
-        if [[ " ${testfuncs[*]} " == *" before_all "* ]]; then
-            echo "echo '$testfile::before_all'"
-            echo "before_all"
-            echo
-        fi
-
-        for func in "${testfuncs[@]}"; do
-            [[ "$func" =~ ^(before|after)_all$ ]] && continue
-
-            echo "echo '$testfile::$func'"
-            echo "$func"
-            echo
-        done
-
-        if [[ " ${testfuncs[*]} " == *" after_all "* ]]; then
-            echo "echo '$testfile::after_all'"
-            echo "after_all"
-            echo
-        fi
+        bgen_import "$test_file"
     done
+
+    bgen:include_str testlib "testlib.sh"
+    echo "$testlib"
 }
 
 # shellcheck disable=SC2034
@@ -181,18 +161,16 @@ process_file() {
 
     local found_first_line=
     while IFS= read -r line; do
-        # process source directives that point ot static files
+        # Process source directives that point ot static files
         process_directive "$line" || { check && continue; }
 
-        # remove first shebang in the file
+        # Remove first shebang in the file
         if ! [[ "$found_first_line" ]]; then
             process_shebang "$line" || { check && continue; }
         fi
 
         if [[ ! "$found_first_line" ]]; then
-            if echo "$line" | grep -E "^[[:space:]]*$" >/dev/null; then
-                continue
-            else
+            if ! echo "$line" | grep -E "^[[:space:]]*$" >/dev/null; then
                 found_first_line=1
             fi
         fi
@@ -207,7 +185,7 @@ process_file() {
 echo_entrypoint_call() {
     if [[ "$entrypoint_func" ]]; then
         # shellcheck disable=SC2016
-        printf '[[ "$__main__" ]] && %s "$@"\n\n' "$entrypoint_func"
+        printf '\n[[ "$__main__" ]] && %s "$@"\n' "$entrypoint_func"
     fi
 }
 
@@ -230,6 +208,8 @@ process_shebang() {
     line=$(trim_str "$line")
 
     if [[ "$line" =~ ^\#\! ]]; then
+        found_first_line=1
+        echo "# BGEN__SHEBANG_REMOVED"
         return 200
     fi
 }
@@ -268,6 +248,12 @@ process_directive() {
 find_source_file() {
     local file="${1:-}"
 
+    # If the file exists, return it
+    if [[ -f "$file" ]]; then
+        echo "$file"
+        return
+    fi
+
     # Check if there exists a file with `.sh` appended to it
     if [[ -f "${file}.sh" ]]; then
         echo "${file}.sh"
@@ -296,7 +282,7 @@ bgen_import() {
     # Raise error if file does not exit
     source_file=$(find_source_file "${1:-}")
     if [[ ! -f "$source_file" ]]; then
-        bail "bgen:import error: cannot import '$file'"
+        bail "bgen import error: cannot import '$file'"
     fi
 
     # Don't re-import file if it was already imported
@@ -304,11 +290,14 @@ bgen_import() {
         # Mark file as imported
         imported_files+=("$(realpath "$source_file")")
 
+        # Add a comment indicating where the processing starts
+        echo "# BGEN__BEGIN $source_file"
+
         # Do normal file processing
         process_file "$source_file"
 
-        # Add some spacing
-        printf '\n\n'
+        # Add a comment indicating where the processing starts
+        echo "# BGEN__END $source_file"
     fi
 
     # Return 200 to tell check() that we've processed something
@@ -333,6 +322,7 @@ bgen_include_str() {
         bail "bgen:include_str error: cannot import $file"
     fi
 
+    echo "# BGEN__INCLUDE_STR_BEGIN"
     echo "${indent}${variable}=\$("
     echo "${indent}cat <<-\"EOF\""
     while IFS= read -r line; do
@@ -340,6 +330,7 @@ bgen_include_str() {
     done <"$file"
     echo "${indent_plus}EOF"
     echo "${indent})"
+    echo "# BGEN__INCLUDE_STR_END"
 
     # Return 200 to tell check() that we've processed something
     return 200
