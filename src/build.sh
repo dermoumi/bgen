@@ -331,6 +331,7 @@ bgen_import() {
     fi
 
     # Raise error if file does not exit
+    local source_file
     source_file=$(find_source_file "${1:-}")
     if [[ ! -f "$source_file" ]]; then
         bail "bgen import error: cannot import '$file'"

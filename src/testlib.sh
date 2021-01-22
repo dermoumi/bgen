@@ -21,26 +21,46 @@ fi
 __get_source_line() {
     local bgen_line="$1"
 
-    local line_file="UNKNOWN_FILE"
-    local line_nr=0
+    local line_file=("UNKNOWN_FILE")
+    local line_nr=(0)
+    local line_offset=(0)
     while IFS= read -r line; do
-        local current_line_nr
-        current_line_nr="$(awk '$2 == "BGEN__BEGIN" {printf $1}' <<<"$line")"
+        local current_line_nr current_line_type
+        current_line_nr="$(awk '{printf $1}' <<<"$line")"
+        current_line_type="$(awk '{printf $2}' <<<"$line")"
 
-        [[ "$current_line_nr" ]] || continue
-        ((bgen_line < current_line_nr)) && break
+        ((current_line_nr > bgen_line)) && break
 
-        line_file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }' <<<"$line")"
-        line_nr=$((current_line_nr))
+        # keep it as ifs, bash 3.2 seems to complain when i use a case here
+        if [[ "$current_line_type" == "BGEN__BEGIN" ]]; then
+            local file
+            file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }' <<<"$line")"
+            line_file=("$file" "${line_file[@]}")
+            line_nr=("$current_line_nr" "${line_nr[@]}")
+            line_offset=(0 "${line_offset[@]}")
+        elif [[ "$current_line_type" == "BGEN__END" ]]; then
+            local file_start_line_nr="${line_nr[0]}"
+            local file_lines=$((current_line_nr - file_start_line_nr))
+            line_file=("${line_file[@]:1}")
+            line_nr=("${line_nr[@]:1}")
+            line_offset=("${line_offset[@]:1}")
+            line_offset[0]=$((line_offset[0] + file_lines))
+        fi
     done <<<"$__BGEN_LINEMAP__"
 
-    echo "${line_file/$PWD\//}:$((bgen_line - line_nr))"
+    echo "${line_file[0]/$PWD\//}:$((bgen_line - line_nr[0] - line_offset[0]))"
 }
 export -f __get_source_line
 
 __handle_error() {
     local rc="$1"
+
     local line="$2"
+    if ((BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] == 2)); then
+        line=$((line + 2))
+    elif ((BASH_VERSINFO[0] == 4 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
+        line=$((line + 1))
+    fi
 
     __error_handled=1
 
@@ -67,8 +87,13 @@ __handle_exit() {
         rc=127
     fi
 
+    local line="${BASH_LINENO[0]}"
+    if ((BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] == 2)); then
+        line=$((line + 1))
+    fi
+
     local source_line
-    source_line="$(__get_source_line $((BASH_LINENO[0] + 1)))"
+    source_line="$(__get_source_line "$line")"
     printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 
     exit "$rc"
@@ -130,7 +155,6 @@ __run_test() {
         __func_finished_successfully=1
     ) >"$stdout_file" 2>"$stderr_file"
     local err=$?
-    local err=1
     set -o errexit -o errtrace -o nounset -o pipefail
 
     if [[ "$err" == 0 ]]; then
