@@ -85,7 +85,7 @@ build_project() {
     build_project_to_stdout >"$tmp_file"
 
     # shellcheck disable=SC1007
-    local output_file
+    local output_file=""
     read_project_meta
 
     # make sure the output's directory exists
@@ -105,7 +105,7 @@ build_project_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
-    local project_name header_file entrypoint_file entrypoint_func shebang_string imports_dir
+    local project_name="" header_file="" entrypoint_file="" entrypoint_func="" shebang_string="" imports_dir=""
     read_project_meta
 
     # build the project
@@ -119,7 +119,7 @@ build_tests_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
-    local project_name header_file tests_dir shebang_string imports_dir
+    local project_name="" header_file="" tests_dir="" shebang_string="" imports_dir=""
     read_project_meta
 
     # make sure tests directory exists
