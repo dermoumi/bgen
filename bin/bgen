@@ -159,7 +159,11 @@ build_tests_to_stdout() {
     if [[ "$failed" ]]; then
         exit 1
     elif ! ((${#test_files[@]})); then
-        test_files=("$tests_dir"/*)
+        for file in "$tests_dir"/*; do
+            if [[ "$(basename "$file")" != "_"* ]]; then
+                test_files+=("$file")
+            fi
+        done
     fi
 
     # build the tests file
