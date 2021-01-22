@@ -6,7 +6,7 @@
         "bin/bgen"
     ],
     "files": [
-        "bin/testfile",
-        "LICENSE"
+        "LICENSE",
+        "README.md"
     ]
 }
