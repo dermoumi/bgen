@@ -29,7 +29,9 @@ __get_source_line() {
         current_line_nr="$(awk '{printf $1}' <<<"$line")"
         current_line_type="$(awk '{printf $2}' <<<"$line")"
 
-        ((current_line_nr > bgen_line)) && break
+        if ((current_line_nr > bgen_line)); then
+            break
+        fi
 
         # keep it as ifs, bash 3.2 seems to complain when i use a case here
         if [[ "$current_line_type" == "BGEN__BEGIN" ]]; then
@@ -44,7 +46,7 @@ __get_source_line() {
             line_file=("${line_file[@]:1}")
             line_nr=("${line_nr[@]:1}")
             line_offset=("${line_offset[@]:1}")
-            line_offset[0]=$((line_offset[0] + file_lines - 1))
+            line_offset[0]=$((line_offset[0] + file_lines))
         fi
     done <<<"$__BGEN_LINEMAP__"
 
@@ -70,7 +72,7 @@ __handle_error() {
 
     local source_line
     source_line="$(__get_source_line "$line")"
-    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 
     exit "$rc"
 }
@@ -101,7 +103,7 @@ __handle_exit() {
 
     local source_line
     source_line="$(__get_source_line "$line")"
-    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 
     exit "$rc"
 }

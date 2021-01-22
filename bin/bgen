@@ -217,7 +217,9 @@ build_tests_to_stdout() {
 		        current_line_nr="$(awk '{printf $1}' <<<"$line")"
 		        current_line_type="$(awk '{printf $2}' <<<"$line")"
 		
-		        ((current_line_nr > bgen_line)) && break
+		        if ((current_line_nr > bgen_line)); then
+		            break
+		        fi
 		
 		        # keep it as ifs, bash 3.2 seems to complain when i use a case here
 		        if [[ "$current_line_type" == "BGEN__BEGIN" ]]; then
@@ -232,7 +234,7 @@ build_tests_to_stdout() {
 		            line_file=("${line_file[@]:1}")
 		            line_nr=("${line_nr[@]:1}")
 		            line_offset=("${line_offset[@]:1}")
-		            line_offset[0]=$((line_offset[0] + file_lines - 1))
+		            line_offset[0]=$((line_offset[0] + file_lines))
 		        fi
 		    done <<<"$__BGEN_LINEMAP__"
 		
@@ -249,7 +251,7 @@ build_tests_to_stdout() {
 		    else
 		        local line="$__bgen_current_cmd_line"
 		
-		        if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] <= 2))); then
+		        if ((BASH_VERSINFO[0] < 4)); then
 		            line=$((line + 1))
 		        fi
 		    fi
@@ -258,7 +260,7 @@ build_tests_to_stdout() {
 		
 		    local source_line
 		    source_line="$(__get_source_line "$line")"
-		    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+		    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 		
 		    exit "$rc"
 		}
@@ -289,7 +291,7 @@ build_tests_to_stdout() {
 		
 		    local source_line
 		    source_line="$(__get_source_line "$line")"
-		    printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+		    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 		
 		    exit "$rc"
 		}
