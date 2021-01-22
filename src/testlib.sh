@@ -57,8 +57,10 @@ export -f __get_source_line
 __handle_error() {
     local rc="$__bgen_current_rc"
 
-    # if we have two successive return commands, use the previous one's line
-    if [[ "$__bgen_current_cmd" == "$__bgen_previous_cmd" ]]; then
+    if ((BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4)) && [[ "${__bgen_assert_line:-}" ]]; then
+        local line=$((__bgen_assert_line + 1))
+    elif [[ "$__bgen_current_cmd" == "$__bgen_previous_cmd" ]]; then
+        # if we have two successive return commands, use the previous one's line
         local line="$__bgen_previous_cmd_line"
     else
         local line="$__bgen_current_cmd_line"
@@ -139,6 +141,7 @@ assert_status() {
     [[ "$status_code" == "$expected_code" ]] && return 0
 
     echo "assert_status: expected $expected_code, got $status_code" >&2
+    __bgen_assert_line="${BASH_LINENO[0]-}"
     return 1
 }
 export -f assert_status
@@ -156,6 +159,7 @@ assert_eq() {
         echo "assert_eq got:"
         echo "$right"
     ) >&2
+    __bgen_assert_line="${BASH_LINENO[0]-}"
     return 1
 }
 export -f assert_eq
