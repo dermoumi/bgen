@@ -58,7 +58,8 @@ build_tests_to_stdout() {
 
     local test_files=()
     local test_funcs=()
-    local failed=
+    local failed=0
+    local no_capture="${BGEN_NO_CAPTURE:-0}"
     while (($#)); do
         case "$1" in
         -k)
@@ -67,6 +68,10 @@ build_tests_to_stdout() {
             ;;
         -k=*)
             test_funcs+=("${1/-k=/}")
+            shift
+            ;;
+        -C | --no-capture)
+            no_capture=1
             shift
             ;;
         *)
@@ -84,7 +89,7 @@ build_tests_to_stdout() {
         esac
     done
 
-    if [[ "$failed" ]]; then
+    if ((failed)); then
         exit 1
     elif ! ((${#test_files[@]})); then
         for file in "$tests_dir"/*; do
@@ -110,6 +115,8 @@ build_tests_to_stdout() {
         echo "\$(declare -F | awk '\$3 ~ /^ *test_/ {printf \"%s\n\", \$3}')"
     fi
     echo ")"
+
+    echo "BGEN_NO_CAPTURE=$no_capture"
 
     bgen:include_str testlib "testlib.sh"
     # shellcheck disable=SC2154

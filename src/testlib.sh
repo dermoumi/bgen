@@ -149,7 +149,7 @@ assert_eq() {
 
     [[ "$left" == "$right" ]] && return 0
 
-    (   
+    (
         echo "assert_eq expected:"
         echo "$left"
         echo
@@ -172,13 +172,19 @@ __run_test() {
     # shellcheck disable=SC2064
     trap "rm '$stderr_file'" EXIT
 
+    # we don't want this subshell to cause the entire test to fail
+    # so we relax bash options until we get a status code
     set +o errexit +o errtrace +o nounset +o pipefail
-    (   
+    (
+        # set up some hooks to print original error lines and files
         trap '__handle_debug "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
         trap 'trap - DEBUG; __handle_error "$LINENO"' ERR
         trap 'trap - DEBUG; __handle_exit "$LINENO"' EXIT
+
+        # enable some bash options to allow error checking
         set -o errexit -o errtrace -o nounset -o pipefail -o functrace
 
+        # call our test function
         "$test_func"
 
         # workaround to check if function didn't end prematurely
@@ -188,8 +194,16 @@ __run_test() {
     local err=$?
     set -o errexit -o errtrace -o nounset -o pipefail
 
-    if [[ ! "${PRINT_ALL-}" && "$err" == 0 ]]; then
+    # print a dot or F depending on test status
+    if ((err)); then
+        printf "%bF%b" "$__COL_DANGER" "$__COL_RESET"
+        __test_failed+=("$test_func")
+    else
         printf "%b.%b" "$__COL_SUCCESS" "$__COL_RESET"
+    fi
+
+    : "${BGEN_NO_CAPTURE:=}"
+    if ! ((err || BGEN_NO_CAPTURE)); then
         return
     fi
 
@@ -212,11 +226,6 @@ __run_test() {
         )
         __test_report+=("$report")
     fi
-
-    __test_failed+=("$test_func")
-
-    printf "%bF%b" "$__COL_DANGER" "$__COL_RESET"
-    return
 }
 
 # look over test functions
