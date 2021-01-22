@@ -246,3 +246,8 @@ if (("${#__test_report[@]}")); then
         echo "$test_report"
     done
 fi
+
+# exit with error if any test failed
+if (("${#__test_failed[@]}")); then
+    exit 1
+fi

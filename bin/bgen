@@ -441,6 +441,11 @@ build_tests_to_stdout() {
 		        echo "$test_report"
 		    done
 		fi
+		
+		# exit with error if any test failed
+		if (("${#__test_failed[@]}")); then
+		    exit 1
+		fi
 		EOF
     )
 # BGEN__INCLUDE_STR_END
