@@ -12,7 +12,7 @@ indent_size = 4
 
 shell_variant = bash
 space_redirects = false
-keep_padding = true
+keep_padding = false
 function_next_line = false
 
 # Ignore generated files

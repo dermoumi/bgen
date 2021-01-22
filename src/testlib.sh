@@ -44,7 +44,7 @@ __get_source_line() {
             line_file=("${line_file[@]:1}")
             line_nr=("${line_nr[@]:1}")
             line_offset=("${line_offset[@]:1}")
-            line_offset[0]=$((line_offset[0] + file_lines))
+            line_offset[0]=$((line_offset[0] + file_lines - 1))
         fi
     done <<<"$__BGEN_LINEMAP__"
 
@@ -53,13 +53,17 @@ __get_source_line() {
 export -f __get_source_line
 
 __handle_error() {
-    local rc="$1"
+    local rc="$__bgen_current_rc"
 
-    local line="$2"
-    if ((BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] == 2)); then
-        line=$((line + 2))
-    elif ((BASH_VERSINFO[0] == 4 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
-        line=$((line + 1))
+    # if we have two successive return commands, use the previous one's line
+    if [[ "$__bgen_current_cmd" == "$__bgen_previous_cmd" ]]; then
+        local line="$__bgen_previous_cmd_line"
+    else
+        local line="$__bgen_current_cmd_line"
+
+        if ((BASH_VERSINFO[0] < 4)); then
+            line=$((line + 1))
+        fi
     fi
 
     __error_handled=1
@@ -68,16 +72,18 @@ __handle_error() {
     source_line="$(__get_source_line "$line")"
     printf '%b%s (rc: %s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
 
-    exit "$1"
+    exit "$rc"
 }
 export -f __handle_error
 
 __handle_exit() {
-    local rc="$1"
+    local rc="$__bgen_current_rc"
 
     if [[ "${__error_handled:-}" ]]; then
         exit "$rc"
     fi
+
+    local line="$__bgen_previous_cmd_line"
 
     # workaround for bash <4.0 returning 0 on nounset errors
     if [[ "$rc" == 0 ]]; then
@@ -85,11 +91,12 @@ __handle_exit() {
 
         # this is the same code bash returns on version 4+ in these cases
         rc=127
-    fi
 
-    local line="${BASH_LINENO[0]}"
-    if ((BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] == 2)); then
-        line=$((line + 1))
+        if [[ "${__bgen_previous_cmd_line:-}" ]]; then
+            line=$((__bgen_previous_cmd_line))
+        fi
+    elif [[ "${__bgen_previous_cmd_line:-}" ]]; then
+        line="$__bgen_previous_cmd_line"
     fi
 
     local source_line
@@ -99,6 +106,27 @@ __handle_exit() {
     exit "$rc"
 }
 export -f __handle_exit
+
+__handle_debug() {
+    local rc="$1"
+    local line="$2"
+    local cmd="$3"
+
+    if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
+        line=$((line + 1))
+    fi
+
+    if ((__bgen_previous_rc == 0)); then
+        __bgen_previous_rc="$__bgen_current_rc"
+        __bgen_previous_cmd="$__bgen_current_cmd"
+        __bgen_previous_cmd_line="$__bgen_current_cmd_line"
+    fi
+
+    __bgen_current_rc="$rc"
+    __bgen_current_cmd="$cmd"
+    __bgen_current_cmd_line="$line"
+}
+export -f __handle_debug
 
 assert_status() {
     local status_code="$?"
@@ -144,9 +172,10 @@ __run_test() {
 
     set +o errexit +o errtrace +o nounset +o pipefail
     (   
-        trap '__handle_error "$?" "$LINENO"' ERR
-        trap '__handle_exit "$?" "$LINENO"' EXIT
-        set -o errexit -o errtrace -o nounset -o pipefail
+        trap '__handle_debug "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
+        trap 'trap - DEBUG; __handle_error "$LINENO"' ERR
+        trap 'trap - DEBUG; __handle_exit "$LINENO"' EXIT
+        set -o errexit -o errtrace -o nounset -o pipefail -o functrace
 
         "$test_func"
 
@@ -157,7 +186,7 @@ __run_test() {
     local err=$?
     set -o errexit -o errtrace -o nounset -o pipefail
 
-    if [[ "$err" == 0 ]]; then
+    if [[ ! "${PRINT_ALL-}" && "$err" == 0 ]]; then
         printf "%b.%b" "$__COL_SUCCESS" "$__COL_RESET"
         return
     fi
