@@ -384,7 +384,7 @@ bgen_include_str() {
         bail "bgen:include_str error: cannot import $file"
     fi
 
-    local heredoc_id="$SRANDOM"
+    local heredoc_id="$RANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
     echo "${indent}${variable}=\$("
     echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""

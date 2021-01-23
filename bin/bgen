@@ -192,107 +192,71 @@ build_tests_to_stdout() {
 
 # BGEN__INCLUDE_STR_BEGIN
     testlib=$(
-    cat <<-"BGEN_EOF_1005529662"
+    cat <<-"BGEN_EOF_10591"
 		#!/usr/bin/env bash
 		
-		__test_failed=()
-		__test_report=()
-		__bgen_covered_lines=()
+		__bgen_test_entrypoint() {
+		    local failed_tests_funcs=()
+		    local test_reports=()
 		
-		if [[ "$NO_COLOR" ]]; then
-		    __COL_DANGER=""
-		    __COL_SUCCESS=""
-		    __COL_TITLE=""
-		    __COL_FILENAME=""
-		    __COL_RESET=""
-		else
-		    __COL_DANGER="\e[31m"
-		    __COL_SUCCESS="\e[32m"
-		    __COL_TITLE="\e[36m"
-		    __COL_FILENAME="\e[33m"
-		    __COL_RESET="\e[0m"
-		fi
+		    local coverage_map=()
 		
-		__BGEN_COVERAGE_HTML_HEADER=$(
-		    cat <<-"EOF"
-		<html lang="en">
-		<head>
-		    <meta charset="UTF-8">
-		    <title>__COVERAGE_TITLE__</title>
+		    # look over test functions
+		    for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
+		        __bgen_test_run_single "$test_func"
+		    done
+		    echo
 		
-		    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/themes/prism-coy.min.css"
-		        integrity="sha512-CKzEMG9cS0+lcH4wtn/UnxnmxkaTFrviChikDEk1MAWICCSN59sDWIF0Q5oDgdG9lxVrvbENSV1FtjLiBnMx7Q=="
-		        crossorigin="anonymous" />
-		    <link rel="stylesheet"
-		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.css"
-		        integrity="sha512-cbQXwDFK7lj2Fqfkuxbo5iD1dSbLlJGXGpfTDqbggqjHJeyzx88I3rfwjS38WJag/ihH7lzuGlGHpDBymLirZQ=="
-		        crossorigin="anonymous" />
-		    <link rel="stylesheet"
-		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.css"
-		        integrity="sha512-nXlJLUeqPMp1Q3+Bd8Qds8tXeRVQscMscwysJm821C++9w6WtsFbJjPenZ8cQVMXyqSAismveQJc0C1splFDCA=="
-		        crossorigin="anonymous" />
-		    <style>
-		        body {
-		            font-family: monospace;
-		        }
-		        .coverage-file {
-		            margin-bottom: 2rem;
-		        }
-		        .line-highlight {
-		            background: linear-gradient(to right,hsl(100deg 89% 63% / 12%) 70%,hsl(105deg 86% 63% / 22%));
-		        }
-		    </style>
-		</head>
-		<body>
-		EOF
-		)
+		    if (("${#test_reports[@]}")); then
+		        for test_report in "${test_reports[@]}"; do
+		            echo "$test_report"
+		        done
+		        printf '\n%b-----%b' "$__BGEN_TEST_COL_FILENAME" "$__BGEN_TEST_COL_RESET"
+		    fi
 		
-		__BGEN_COVERAGE_HTML_FILE=$(
-		    cat <<-"EOF"
-		<div class="coverage-file">
-		    <p class="coverage-file-title">
-		        <span class="coverage-file-name">__COVERAGE_FILE_NAME__</span>
-		        <span class="coverage-covered-lines">
-		            (<span
-		                class="covered"
-		            >__COVERAGE_FILE_COVERED_LINES__</span>/<span
-		                class="total"
-		            >__COVERAGE_FILE_TOTAL_LINES__</span>)
-		        <span>
-		    </p>
-		    <pre
-		        class="line-numbers linkable-line-numbers" data-line="__COVERAGE_FILE_LINES__"
-		    ><code class="language-bash">__COVERAGE_FILE_CODE__</code></pre>
-		</div>
-		EOF
-		)
+		    if (("${#failed_tests_funcs[@]}")); then
+		        printf "\n%bFailed tests:%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
+		        for test_func in "${failed_tests_funcs[@]}"; do
+		            echo "    $test_func"
+		        done
+		    fi
 		
-		__BGEN_COVERAGE_HTML_FOOTER=$(
-		    cat <<-"EOF"
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/prism.min.js"
-		    integrity="sha512-YBk7HhgDZvBxmtOfUdvX0z8IH2d10Hp3aEygaMNhtF8fSOvBZ16D/1bXZTJV6ndk/L/DlXxYStP8jrF77v2MIg=="
-		    crossorigin="anonymous"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/components/prism-bash.min.js"
-		    integrity="sha512-JvRd44DHaJAv/o3wxi/dxhz2TO/jwwX8V5/LTr3gj6QMQ6qNNGXk/psoingLDuc5yZmccOq7XhpVaelIZE4tsQ=="
-		    crossorigin="anonymous"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.js"
-		    integrity="sha512-br8H6OngKoLht57WKRU5jz3Vr0vF+Tw4G6yhNN2F3dSDheq4JiaasROPJB1wy7PxPk7kV/+5AIbmoZLxxx7Zow=="
-		    crossorigin="anonymous"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.js"
-		    integrity="sha512-MGMi0fbhnsk/a/9vCluWv3P4IOfHijjupSoVYEdke+QQyGBOAaXNXnwW6/IZSH7JLdknDf6FL6b57o+vnMg3Iw=="
-		    crossorigin="anonymous"></script>
-		</body>
-		</html>
-		EOF
-		)
+		    # report on coverage if requested
+		    BGEN_COVERAGE=1
+		    BGEN_HTML_REPORT=1
+		    BGEN_COVERAGE_M_THRESHOLD=60
+		    BGEN_COVERAGE_H_THRESHOLD=85
+		    if ((BGEN_COVERAGE)); then
+		        printf "\n%bCoverage:%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
+		        __bgen_test_make_coverage_report
+		    fi
 		
-		# shellcheck disable=SC2120
-		__get_source_line() {
+		    # exit with error if any test failed
+		    if (("${#failed_tests_funcs[@]}")); then
+		        exit 1
+		    fi
+		}
+		
+		__bgen_test_get_linemap() {
+		    if [[ ! "$__BGEN_LINEMAP__" ]]; then
+		        : # To do add linemap generation inside this
+		    fi
+		
+		    echo "$__BGEN_LINEMAP__"
+		}
+		
+		# requires 2 variables: source_file and source_line_nr to be declared
+		__bgen_test_get_source_line() {
 		    local bgen_line="$1"
 		
-		    local line_file=("UNKNOWN_FILE")
-		    local line_nr=(0)
-		    local line_offset=(0)
+		    # make sure extglob is enabled
+		    shopt -s extglob
+		
+		    # stacks to keep track of...
+		    local files_stack=("UNKNOWN_FILE") # which file we're currently processing
+		    local line_nrs_stack=(0)           # the start line number of the file
+		    local offsets_stack=(0)            # how much lines should we offset from this file's linecount
+		
 		    while IFS= read -r line; do
 		        local current_line_nr current_line_type
 		        current_line_nr="$(awk '{printf $1}' <<<"$line")"
@@ -302,111 +266,151 @@ build_tests_to_stdout() {
 		            break
 		        fi
 		
-		        # keep it as ifs, bash 3.2 seems to complain when i use a case here
+		        # TODO: Use this instead of awk
+		        # if [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
+		        #     local file="${line/*([[:space:]])\#[[:space:]]BGEN__BEGIN+([[:space:]])/}"
+		
+		        # bash 3.2 seems to complain when i use case .. in .. esac here
 		        if [[ "$current_line_type" == "BGEN__BEGIN" ]]; then
 		            local file
 		            file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }' <<<"$line")"
-		            line_file=("$file" "${line_file[@]}")
-		            line_nr=("$current_line_nr" "${line_nr[@]}")
-		            line_offset=(0 "${line_offset[@]}")
+		
+		            # add values related to this file to the new stack
+		            files_stack=("$file" "${files_stack[@]}")
+		            line_nrs_stack=("$current_line_nr" "${line_nrs_stack[@]}")
+		            offsets_stack=(0 "${offsets_stack[@]}")
 		        elif [[ "$current_line_type" == "BGEN__END" ]]; then
-		            local file_start_line_nr="${line_nr[0]}"
+		            local file_start_line_nr="${line_nrs_stack[0]}"
 		            local file_lines=$((current_line_nr - file_start_line_nr))
-		            line_file=("${line_file[@]:1}")
-		            line_nr=("${line_nr[@]:1}")
-		            line_offset=("${line_offset[@]:1}")
-		            line_offset[0]=$((line_offset[0] + file_lines))
+		
+		            # pop the first item from the stack
+		            files_stack=("${files_stack[@]:1}")
+		            line_nrs_stack=("${line_nrs_stack[@]:1}")
+		            offsets_stack=("${offsets_stack[@]:1}")
+		
+		            # offset the previous item's lines with the linecount of this file
+		            offsets_stack[0]=$((offsets_stack[0] + file_lines))
 		        fi
-		    done <<<"$__BGEN_LINEMAP__"
+		    done < <(__bgen_test_get_linemap)
 		
-		    echo "${line_file[0]/$PWD\//}:$((bgen_line - line_nr[0] - line_offset[0]))"
+		    if declare -p source_file 1>/dev/null 2>&1; then
+		        source_file="${files_stack[0]/$PWD\//}"
+		    fi
+		
+		    if declare -p source_line_nr 1>/dev/null 2>&1; then
+		        source_line_nr=$((bgen_line - line_nrs_stack[0] - offsets_stack[0]))
+		    fi
 		}
-		export -f __get_source_line
+		export -f __bgen_test_get_source_line
 		
-		__handle_error() {
-		    local rc="$__bgen_current_rc"
+		# called when a test's subprocess exits with a non-zero return code
+		__bgen_test_error_handler() {
+		    local rc="$__bgen_test_current_rc"
 		
+		    # get error line number
 		    if ((BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4)) && [[ "${__bgen_assert_line:-}" ]]; then
-		        local line=$((__bgen_assert_line + 1))
-		    elif [[ "$__bgen_current_cmd" == "$__bgen_previous_cmd" ]]; then
+		        # bash version 4.0 to 4.3 only call the handler AFTER the returning function was left
+		        # the workaround here is to have assert functions to keep track of the line they left at instead
+		        local line_nr=$((__bgen_assert_line + 1))
+		    elif [[ "$__bgen_test_current_cmd" == "$__bgen_test_prev_cmd" ]]; then
 		        # if we have two successive return commands, use the previous one's line
-		        local line="$__bgen_previous_cmd_line"
+		        # workaround for when bash reports the return AFTER the returning to the parent function
+		        local line_nr="$__bgen_test_prev_line_nr"
 		    else
-		        local line="$__bgen_current_cmd_line"
+		        local line_nr="$__bgen_test_current_line_nr"
 		
+		        # bash 3.2 strangely uses the previous line for errors
 		        if ((BASH_VERSINFO[0] < 4)); then
-		            line=$((line + 1))
+		            line_nr=$((line_nr + 1))
 		        fi
 		    fi
 		
-		    __error_handled=1
+		    # prevent the exit_handler from outputting anything since it's also executed
+		    __bgen_test_error_handled=1
 		
-		    local source_line
-		    source_line="$(__get_source_line "$line")"
-		    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+		    # print the original source file and line number for easy debugging
+		    local source_file=""
+		    local source_line_nr=""
+		    __bgen_test_get_source_line "$line_nr"
+		    printf '%b%s:%s (rc=%s)%b\n' \
+		        "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
 		
+		    # exit with the same return code we came with
 		    exit "$rc"
 		}
-		export -f __handle_error
+		export -f __bgen_test_error_handler
 		
-		__handle_exit() {
-		    local rc="$__bgen_current_rc"
+		# called when a test's subprocess exits
+		__bgen_test_exit_handler() {
+		    local rc="$__bgen_test_current_rc"
 		
-		    # save coverage file
+		    # save coverage lines into a file, only way to communicate them to the parent process
 		    declare -p __bgen_test_covered_lines >"$__bgen_env_file"
 		
-		    if [[ "${__error_handled:-}" ]]; then
+		    # if the error handler was already triggered, don't do anything else here
+		    if ((${__bgen_test_error_handled:-})); then
 		        exit "$rc"
 		    fi
 		
-		    local line="$__bgen_previous_cmd_line"
+		    # more reliable than LINENO
+		    local line_nr="$__bgen_test_prev_line_nr"
 		
-		    # workaround for bash <4.0 returning 0 on nounset errors
+		    # get exit line number
 		    if [[ "$rc" == 0 ]]; then
+		        # workaround for bash <4.0 returning 0 on nounset errors
 		        [[ "${__func_finished_successfully:-}" ]] && exit 0
 		
 		        # this is the same code bash returns on version 4+ in these cases
 		        rc=127
 		
-		        if [[ "${__bgen_previous_cmd_line:-}" ]]; then
-		            line=$((__bgen_previous_cmd_line))
+		        if [[ "${__bgen_test_prev_line_nr:-}" ]]; then
+		            line_nr=$((__bgen_test_prev_line_nr))
 		        fi
-		    elif [[ "${__bgen_previous_cmd_line:-}" ]]; then
-		        line="$__bgen_previous_cmd_line"
+		    elif [[ "${__bgen_test_prev_line_nr:-}" ]]; then
+		        line_nr="$__bgen_test_prev_line_nr"
 		    fi
 		
-		    local source_line
-		    source_line="$(__get_source_line "$line")"
-		    printf '%b%s (rc=%s)%b\n' "$__COL_DANGER" "$source_line" "$rc" "$__COL_RESET" >&2
+		    # print the original source and line number for easy debugging
+		    local source_file=""
+		    local source_line_nr=""
+		    __bgen_test_get_source_line "$line_nr"
+		    printf '%b%s:%s (rc=%s)%b\n' \
+		        "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
 		
+		    # exit with the same return code we came with
 		    exit "$rc"
 		}
-		export -f __handle_exit
+		export -f __bgen_test_exit_handler
 		
-		__handle_debug() {
+		# called before each line, use to keep track of what lines
+		# were executed, and which are the last 2 commands and their rc and line numbers
+		# used for error reporting and code coverage
+		__bgen_test_debug_handler() {
 		    local rc="$1"
-		    local line="$2"
+		    local line_nr="$2"
 		    local cmd="$3"
 		
+		    # bash versions <5.1 don't seem to count the shebang in their line count
 		    if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
-		        line=$((line + 1))
+		        line_nr=$((line_nr + 1))
 		    fi
 		
 		    if ((__bgen_previous_rc == 0)); then
-		        __bgen_previous_rc="$__bgen_current_rc"
-		        __bgen_previous_cmd="$__bgen_current_cmd"
-		        __bgen_previous_cmd_line="$__bgen_current_cmd_line"
+		        __bgen_previous_rc="$__bgen_test_current_rc"
+		        __bgen_test_prev_cmd="$__bgen_test_current_cmd"
+		        __bgen_test_prev_line_nr="$__bgen_test_current_line_nr"
 		    fi
 		
-		    __bgen_current_rc="$rc"
-		    __bgen_current_cmd="$cmd"
-		    __bgen_current_cmd_line="$line"
+		    __bgen_test_current_rc="$rc"
+		    __bgen_test_current_cmd="$cmd"
+		    __bgen_test_current_line_nr="$line_nr"
 		
-		    __bgen_test_covered_lines[$line]=1
+		    __bgen_test_covered_lines[$line_nr]=1
 		}
-		export -f __handle_debug
+		export -f __bgen_test_debug_handler
 		
-		__bgen_join_by() {
+		# joins lines with a delimited
+		__bgen_test_join_by() {
 		    if (($# <= 1)); then
 		        return 0
 		    fi
@@ -415,183 +419,310 @@ build_tests_to_stdout() {
 		    local first="$2"
 		    shift 2
 		
-		    printf %s "$first" "${@/#/$delimiter}"
+		    printf '%s' "$first" "${@/#/$delimiter}"
 		}
 		
+		# Returns true if a line is covered according to the coverage map
 		__bgen_is_line_covered() {
-		    local nr="$1"
+		    local line_nr="$1"
 		    local line="$2"
 		
-		    if [[ "${__bgen_covered_lines[$nr]-}" ]]; then
+		    if [[ "${coverage_map[$line_nr]-}" ]]; then
+		        # line is in the coverage map
 		        return 0
 		    fi
 		
-		    if [[ "$line" =~ ^[[:space:]]*[\(\)\{\}]?[[:space:]]*$ ]]; then
-		        ((last_line_is_covered))
+		    if [[ "$line" =~ ^[[:space:]]*$ ]]; then
+		        # line is empty space
+		        # covered only if the previous line also covered
+		        ((${is_prev_line_covered_stack[0]-}))
 		        return
 		    fi
 		
 		    if [[ "$line" =~ ^[[:space:]]*\# ]]; then
-		        return 0
+		        # line is a comment
+		        # covered only if the previous line also covered
+		        ((${is_prev_line_covered_stack[0]-}))
+		        return
 		    fi
 		
+		    if [[ "$line" =~ ^[[:space:]]*[\(\)\{\}][[:space:]]*$ ]]; then
+		        # line is a single parenthesis
+		        # covered only if the previous line also covered
+		        ((${is_prev_line_covered_stack[0]-}))
+		        return
+		    fi
+		
+		    # otherwise, line is not covered
 		    return 1
 		}
 		
-		__bgen_add_file_coverage() {
+		# prints coverage report for a given file
+		__bgen_test_add_file_report() {
 		    local filename="$1"
 		    local covered_hunks="$2"
 		    local covered_lines_count="$3"
 		    local total_lines_count="$4"
 		
-		    local code
-		    code="$(cat "$filename")"
-		    code="${code//</&lt;}"
-		    code="${code//>/&gt;}"
+		    local percent=$((100 * covered_lines_count / total_lines_count))
+		    local filename_short="${filename/$PWD\//}"
 		
-		    local html
-		    html="${__BGEN_COVERAGE_HTML_FILE/__COVERAGE_FILE_NAME__/${filename/$PWD\//}}"
-		    html="${html/__COVERAGE_FILE_COVERED_LINES__/$covered_lines_count}"
-		    html="${html/__COVERAGE_FILE_TOTAL_LINES__/$total_lines_count}"
-		    html="${html/__COVERAGE_FILE_LINES__/$covered_hunks}"
-		    html="${html/__COVERAGE_FILE_CODE__/$code}"
+		    if ((percent >= BGEN_COVERAGE_H_THRESHOLD)); then
+		        local coverage_rating="h"
+		        local coverage_color="$__BGEN_TEST_COL_SUCCESS"
+		    elif ((percent >= BGEN_COVERAGE_M_THRESHOLD)); then
+		        local coverage_rating="m"
+		        local coverage_color="$__BGEN_TEST_COL_WARNING"
+		    else
+		        local coverage_rating="l"
+		        local coverage_color="$__BGEN_TEST_COL_DANGER"
+		    fi
 		
-		    coverage_output+="$html"
+		    if ((BGEN_HTML_REPORT)); then
+		        local file_id="${filename_short//[![:alnum:]-_]/_}"
+		
+		        local code
+		        code="$(cat "$filename")"
+		        code="${code//</&lt;}"
+		        code="${code//>/&gt;}"
+		
+		        local html
+		        html="${__BGEN_COVERAGE_HTML_FILE//__COVERAGE_FILE_NAME__/$filename_short}"
+		        html="${html//__COVERAGE_FILE_ID__/$file_id}"
+		        html="${html//__COVERAGE_FILE_COVERED__/$covered_lines_count}"
+		        html="${html//__COVERAGE_FILE_LINES__/$total_lines_count}"
+		        html="${html//__COVERAGE_FILE_PERCENT__/$percent}"
+		        html="${html//__COVERAGE_FILE_RATING__/$coverage_rating}"
+		        html="${html//__COVERAGE_FILE_HUNKS__/$covered_hunks}"
+		        html="${html//__COVERAGE_FILE_CODE__/$code}"
+		
+		        html_report+="$html"
+		    fi
+		
+		    local report_line
+		    report_line="$(
+		        printf '%s %b(%s/%s)\t%b%3s%%%b' "$filename_short" \
+		            "$__BGEN_TEST_COL_TRIVIAL" "$covered_lines_count" \
+		            "$total_lines_count" "$coverage_color" "$percent" "$__BGEN_TEST_COL_RESET"
+		    )"
+		
+		    coverage_report+=("$report_line")
 		}
 		
-		__bgen_report_coverage() {
+		# print final coverage report
+		__bgen_test_make_coverage_report() {
 		    shopt -s extglob
 		
-		    local coverage_output="${__BGEN_COVERAGE_HTML_HEADER}"
+		    local html_report=""
+		    local coverage_report=()
 		
-		    local line_file=("UNKNOWN_FILE")
-		    local line_nr=(0)
-		    local line_offset=(0)
+		    local files_stack=("UNKNOWN_FILE")
+		    local line_nrs_stack=(0)
+		    local offsets_stack=(0)
 		
-		    local covered_file_lines=(0)
-		    local total_file_lines=(0)
+		    local covered_lines_stack=(0)
+		    local total_lines_stack=(0)
 		
 		    local total_covered=0
 		    local total_lines=0
 		
 		    local covered_hunks=()
-		    local covered_hunks_count=(0)
-		    local hunk_start=("")
-		    local hunk_end=("")
+		    local covered_hunk_count_stack=(0)
+		    local hunk_start_stack=("")
+		    local hunk_end_stack=("")
 		
-		    local last_line_is_covered=0
+		    local is_prev_line_covered_stack=(1)
 		
-		    echo
-		    local current_line_nr=0
+		    local line_nr=0
 		    while IFS= read -r line; do
-		        current_line_nr=$((current_line_nr + 1))
+		        line_nr=$((line_nr + 1))
 		
 		        if [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
 		            local file="${line/*([[:space:]])\#[[:space:]]BGEN__BEGIN+([[:space:]])/}"
-		            line_file=("$file" "${line_file[@]}")
-		            line_nr=("$current_line_nr" "${line_nr[@]}")
-		            line_offset=(0 "${line_offset[@]}")
+		            files_stack=("$file" "${files_stack[@]}")
+		            line_nrs_stack=("$line_nr" "${line_nrs_stack[@]}")
+		            offsets_stack=(0 "${offsets_stack[@]}")
 		
-		            covered_file_lines=(0 "${covered_file_lines[@]}")
-		            total_file_lines=(0 "${total_file_lines[@]}")
+		            covered_lines_stack=(0 "${covered_lines_stack[@]}")
+		            total_lines_stack=(0 "${total_lines_stack[@]}")
 		
-		            covered_hunks_count=(0 "${covered_hunks_count[@]}")
-		            hunk_start=("" "${hunk_start[@]}")
-		            hunk_end=("" "${hunk_end[@]}")
+		            covered_hunk_count_stack=(0 "${covered_hunk_count_stack[@]}")
+		            hunk_start_stack=("" "${hunk_start_stack[@]}")
+		            hunk_end_stack=("" "${hunk_end_stack[@]}")
+		
+		            is_prev_line_covered_stack=(1 "${is_prev_line_covered_stack[@]}")
 		
 		            continue
 		        elif [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__END[[:space:]] ]]; then
-		            if [[ "${hunk_start[0]}" ]]; then
-		                if [[ "${hunk_start[0]}" == "${hunk_end[0]}" ]]; then
-		                    covered_hunks+=("${hunk_start[0]}")
+		            if [[ "${hunk_start_stack[0]}" ]]; then
+		                if [[ "${hunk_start_stack[0]}" == "${hunk_end_stack[0]}" ]]; then
+		                    covered_hunks+=("${hunk_start_stack[0]}")
 		                else
-		                    covered_hunks+=("${hunk_start[0]}-${hunk_end[0]}")
+		                    covered_hunks+=("${hunk_start_stack[0]}-${hunk_end_stack[0]}")
 		                fi
-		                covered_hunks_count[0]=$((covered_hunks_count[0] + 1))
-		                hunk_start[0]=""
-		                hunk_end[0]=""
+		                covered_hunk_count_stack[0]=$((covered_hunk_count_stack[0] + 1))
+		                hunk_start_stack[0]=""
+		                hunk_end_stack[0]=""
 		            fi
 		
-		            local file_covered_hunks=("${covered_hunks[@]::${covered_hunks_count[0]}}")
-		            __bgen_add_file_coverage "${line_file[0]}" "$(__bgen_join_by "," "${file_covered_hunks[@]}")" \
-		                "${covered_file_lines[0]}" "${total_file_lines[0]}"
+		            local file_covered_hunks=("${covered_hunks[@]::${covered_hunk_count_stack[0]}}")
+		            __bgen_test_add_file_report "${files_stack[0]}" \
+		                "$(__bgen_test_join_by "," "${file_covered_hunks[@]}")" \
+		                "${covered_lines_stack[0]}" "${total_lines_stack[0]}"
 		
-		            local file_start="${line_nr[0]}"
-		            local file_size=$((current_line_nr - file_start))
+		            local file_start="${line_nrs_stack[0]}"
+		            local file_size=$((line_nr - file_start))
 		
-		            line_file=("${line_file[@]:1}")
-		            line_nr=("${line_nr[@]:1}")
-		            line_offset=("${line_offset[@]:1}")
-		            line_offset[0]=$((line_offset[0] + file_size))
+		            files_stack=("${files_stack[@]:1}")
+		            line_nrs_stack=("${line_nrs_stack[@]:1}")
+		            offsets_stack=("${offsets_stack[@]:1}")
+		            offsets_stack[0]=$((offsets_stack[0] + file_size))
 		
-		            total_covered=$((total_covered + covered_file_lines[0]))
-		            total_lines=$((total_lines + total_file_lines[0]))
+		            total_covered=$((total_covered + covered_lines_stack[0]))
+		            total_lines=$((total_lines + total_lines_stack[0]))
 		
-		            covered_file_lines=("${covered_file_lines[@]:1}")
-		            covered_file_lines[0]=$((covered_file_lines[0] + 1))
+		            covered_lines_stack=("${covered_lines_stack[@]:1}")
+		            covered_lines_stack[0]=$((covered_lines_stack[0] + 1))
 		
-		            total_file_lines=("${total_file_lines[@]:1}")
-		            total_file_lines[0]=$((total_file_lines[0] + 1))
+		            total_lines_stack=("${total_lines_stack[@]:1}")
+		            total_lines_stack[0]=$((total_lines_stack[0] + 1))
 		
-		            covered_hunks=("${covered_hunks[@]:${covered_hunks_count[0]}}")
-		            covered_hunks_count=("${covered_hunks_count[@]:1}")
-		            hunk_start=("${hunk_start[@]:1}")
-		            hunk_end=("${hunk_end[@]:1}")
+		            covered_hunks=("${covered_hunks[@]:${covered_hunk_count_stack[0]}}")
+		            covered_hunk_count_stack=("${covered_hunk_count_stack[@]:1}")
+		            hunk_start_stack=("${hunk_start_stack[@]:1}")
+		            hunk_end_stack=("${hunk_end_stack[@]:1}")
 		
-		            if [[ "${hunk_start[0]}" ]]; then
-		                hunk_end[0]=$((hunk_end[0] + 1))
+		            if [[ "${hunk_start_stack[0]}" ]]; then
+		                hunk_end_stack[0]=$((hunk_end_stack[0] + 1))
 		            else
-		                local line_nr_offset=$((current_line_nr - line_nr[0] - line_offset[0]))
-		                hunk_start[0]="$line_nr_offset"
-		                hunk_end[0]="$line_nr_offset"
+		                local line_nr_offset=$((line_nr - line_nrs_stack[0] - offsets_stack[0]))
+		                hunk_start_stack[0]="$line_nr_offset"
+		                hunk_end_stack[0]="$line_nr_offset"
 		            fi
 		
-		            last_line_is_covered=1
+		            is_prev_line_covered_stack=("${is_prev_line_covered_stack[@]:1}")
+		
 		            continue
 		        fi
 		
-		        if ((${#line_file[@]} > 1)); then
-		            if __bgen_is_line_covered "$current_line_nr" "$line"; then
-		                if [[ "${hunk_start[0]}" ]]; then
-		                    hunk_end[0]=$((hunk_end[0] + 1))
+		        if ((${#files_stack[@]} > 1)); then
+		            if __bgen_is_line_covered "$line_nr" "$line"; then
+		                if [[ "${hunk_start_stack[0]}" ]]; then
+		                    hunk_end_stack[0]=$((hunk_end_stack[0] + 1))
 		                else
-		                    local line_nr_offset=$((current_line_nr - line_nr[0] - line_offset[0]))
-		                    hunk_start[0]="$line_nr_offset"
-		                    hunk_end[0]="$line_nr_offset"
+		                    local line_nr_offset=$((line_nr - line_nrs_stack[0] - offsets_stack[0]))
+		                    hunk_start_stack[0]="$line_nr_offset"
+		                    hunk_end_stack[0]="$line_nr_offset"
 		                fi
 		
-		                covered_file_lines[0]=$((covered_file_lines[0] + 1))
+		                covered_lines_stack[0]=$((covered_lines_stack[0] + 1))
 		
-		                last_line_is_covered=1
+		                is_prev_line_covered_stack[0]=1
 		            else
-		                if [[ "${hunk_start[0]}" ]]; then
-		                    if [[ "${hunk_start[0]}" == "${hunk_end[0]}" ]]; then
-		                        covered_hunks+=("${hunk_start[0]}")
+		                if [[ "${hunk_start_stack[0]}" ]]; then
+		                    if [[ "${hunk_start_stack[0]}" == "${hunk_end_stack[0]}" ]]; then
+		                        covered_hunks+=("${hunk_start_stack[0]}")
 		                    else
-		                        covered_hunks+=("${hunk_start[0]}-${hunk_end[0]}")
+		                        covered_hunks+=("${hunk_start_stack[0]}-${hunk_end_stack[0]}")
 		                    fi
 		
-		                    covered_hunks_count[0]=$((covered_hunks_count[0] + 1))
-		                    hunk_start[0]=""
-		                    hunk_end[0]=""
+		                    covered_hunk_count_stack[0]=$((covered_hunk_count_stack[0] + 1))
+		                    hunk_start_stack[0]=""
+		                    hunk_end_stack[0]=""
 		                fi
 		
-		                last_line_is_covered=0
+		                is_prev_line_covered_stack[0]=0
 		            fi
 		
-		            total_file_lines[0]=$((total_file_lines[0] + 1))
-		
-		            # printf '%s %s:\t%s\e[30m (%s)\e[0m\n' \
-		            #     "${last_line_is_covered/0/-}" "$current_line_nr" "$line" "${hunk_start[0]-}-${hunk_end[0]-}" >&2
+		            total_lines_stack[0]=$((total_lines_stack[0] + 1))
 		        fi
+		
+		        # printf '%s %s:\t%s\e[30m (%s)\e[0m\n' \
+		        #     "${is_prev_line_covered_stack[0]/0/-}" "$line_nr" "$line" "${hunk_start[0]-}-${hunk_end[0]-}" >&2
 		    done <<<"$BASH_EXECUTION_STRING"
 		
-		    coverage_output+="${__BGEN_COVERAGE_HTML_FOOTER}"
-		    echo "$coverage_output" >"coverage.html"
+		    local coverage_percent
+		    coverage_percent=$((100 * total_covered / total_lines))
+		    if ((coverage_percent >= BGEN_COVERAGE_H_THRESHOLD)); then
+		        local coverage_color="$__BGEN_TEST_COL_SUCCESS"
+		        local coverage_rating="h"
+		    elif ((coverage_percent >= BGEN_COVERAGE_M_THRESHOLD)); then
+		        local coverage_color="$__BGEN_TEST_COL_WARNING"
+		        local coverage_rating="m"
+		    else
+		        local coverage_color="$__BGEN_TEST_COL_DANGER"
+		        local coverage_rating="l"
+		    fi
 		
-		    echo "covered: $total_covered/$total_lines"
-		    echo
-		    echo "totol lines $current_line_nr"
+		    # save html report
+		    if ((BGEN_HTML_REPORT)); then
+		        local coverage_date
+		        coverage_date=$(date)
+		
+		        local html_header="${__BGEN_COVERAGE_HTML_HEADER//__COVERAGE_DATE__/$coverage_date}"
+		        html_header="${html_header//__COVERAGE_TITLE__/Coverage report}"
+		        html_header="${html_header//__COVERAGE_TOTAL_COVERED__/$total_covered}"
+		        html_header="${html_header//__COVERAGE_TOTAL_LINES__/$total_lines}"
+		        html_header="${html_header//__COVERAGE_TOTAL_PERCENT__/$coverage_percent}"
+		        html_header="${html_header//__COVERAGE_TOTAL_RATING__/$coverage_rating}"
+		
+		        local final_html_report="$html_header"
+		        final_html_report+="$html_report"
+		        final_html_report+="${__BGEN_COVERAGE_HTML_FOOTER}"
+		        echo "$final_html_report" >"coverage.html"
+		    fi
+		
+		    # print file reports
+		    __bgen_test_format_columns "  " < <(
+		        printf '  \t%s\n' "${coverage_report[@]}"
+		        printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
+		            "$__BGEN_TEST_COL_TRIVIAL" "$total_covered" "$total_lines" \
+		            "$coverage_color" "$coverage_percent" "$__BGEN_TEST_COL_RESET"
+		    )
+		}
+		
+		# formats tab separated stdin entries as columns
+		__bgen_test_format_columns() {
+		    local separator="${1:-' '}"
+		
+		    # parse manually
+		    local column_widths=()
+		    local lines=()
+		    local cell
+		    local cell_width
+		
+		    # for each column find the longest cell
+		    while IFS= read -r line; do
+		        if [[ "$line" ]]; then
+		            local i=0
+		            while IFS= read -r cell; do
+		                cell_width="${#cell}"
+		                if ((cell_width > column_widths[i])); then
+		                    column_widths[$i]="$cell_width"
+		                fi
+		                i=$((i + 1))
+		            done <<<"${line//$'\t'/$'\n'}"
+		        fi
+		
+		        lines+=("$line")
+		    done
+		
+		    # generate a printf string such as it can print each cells at a given width
+		    local printf_query
+		    printf_query=$(printf -- "$separator%%-%ss" "${column_widths[@]}")
+		    for line in "${lines[@]-}"; do
+		        if [[ ! "$line" ]]; then
+		            echo
+		            continue
+		        fi
+		
+		        cells=()
+		        while IFS= read -r cell; do
+		            cells+=("$cell")
+		        done <<<"${line//$'\t'/$'\n'}"
+		        # shellcheck disable=SC2059
+		        printf "${printf_query/$separator/}\n" "${cells[@]}"
+		    done
 		}
 		
 		assert_status() {
@@ -626,7 +757,7 @@ build_tests_to_stdout() {
 		}
 		export -f assert_eq
 		
-		__run_test() {
+		__bgen_test_run_single() {
 		    local test_func="$1"
 		    local stdout_file stderr_file
 		
@@ -651,9 +782,9 @@ build_tests_to_stdout() {
 		        __bgen_test_covered_lines=()
 		
 		        # set up some hooks to print original error lines and files
-		        trap '__handle_debug "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
-		        trap 'trap - DEBUG; __handle_error "$LINENO"' ERR
-		        trap 'trap - DEBUG; __handle_exit "$LINENO"' EXIT
+		        trap '__bgen_test_debug_handler "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
+		        trap 'trap - DEBUG; __bgen_test_error_handler "$LINENO"' ERR
+		        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO"' EXIT
 		
 		        # enable some bash options to allow error checking
 		        set -o errexit -o errtrace -o nounset -o pipefail -o functrace
@@ -671,14 +802,21 @@ build_tests_to_stdout() {
 		    # Merge covered lines into the global list
 		    local coverage_array
 		    coverage_array="$(cat "$env_file")"
-		    eval "${coverage_array/declare -a __bgen_test_covered_lines=/__bgen_covered_lines+=}"
+		    if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+		        # going throug a variable becuase bash 3.2 doesn't allow escaping single quote in substitutions
+		        local substitution="'coverage_map+="
+		        # workaround bash <4.4 quoting the content of the variables in declare's output
+		        eval "$(eval "echo ${coverage_array/declare -a __bgen_test_covered_lines=\'/$substitution}")"
+		    else
+		        eval "${coverage_array/declare -a __bgen_test_covered_lines=/coverage_map+=}"
+		    fi
 		
 		    # print a dot or F depending on test status
 		    if ((err)); then
-		        printf "%bF%b" "$__COL_DANGER" "$__COL_RESET"
-		        __test_failed+=("$test_func")
+		        printf "%bF%b" "$__BGEN_TEST_COL_DANGER" "$__BGEN_TEST_COL_RESET"
+		        failed_tests_funcs+=("$test_func")
 		    else
-		        printf "%b.%b" "$__COL_SUCCESS" "$__COL_RESET"
+		        printf "%b.%b" "$__BGEN_TEST_COL_SUCCESS" "$__BGEN_TEST_COL_RESET"
 		    fi
 		
 		    : "${BGEN_NO_CAPTURE:=}"
@@ -689,54 +827,170 @@ build_tests_to_stdout() {
 		    if [[ -s "$stdout_file" || -s "$stderr_file" ]]; then
 		        local report
 		        report=$(
-		            printf '\n%b----- %s ----- %b\n' "$__COL_FILENAME" "$test_func" "$__COL_RESET"
+		            printf '\n%b----- %s ----- %b\n' "$__BGEN_TEST_COL_FILENAME" "$test_func" "$__BGEN_TEST_COL_RESET"
 		
 		            if [[ -s "$stdout_file" ]]; then
-		                printf "%bstdout:%b\n" "$__COL_TITLE" "$__COL_RESET"
+		                printf "%bstdout:%b\n" "$__BGEN_TEST_COL_TRIVIAL" "$__BGEN_TEST_COL_RESET"
 		                cat "$stdout_file"
 		                echo
 		            fi
 		
 		            if [[ -s "$stderr_file" ]]; then
-		                printf "%bstderr:%b\n" "$__COL_TITLE" "$__COL_RESET"
+		                printf "%bstderr:%b\n" "$__BGEN_TEST_COL_TRIVIAL" "$__BGEN_TEST_COL_RESET"
 		                cat "$stderr_file"
 		                echo
 		            fi
 		        )
-		        __test_report+=("$report")
+		        test_reports+=("$report")
 		    fi
 		}
 		
-		# look over test functions
-		for __test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
-		    __run_test "$__test_func"
-		done
-		echo
-		
-		if (("${#__test_failed[@]}")); then
-		    printf "\n%bFailed tests:%b\n" "$__COL_TITLE" "$__COL_RESET"
-		    for test_func in "${__test_failed[@]}"; do
-		        echo "    $test_func"
-		    done
+		if [[ "$NO_COLOR" ]]; then
+		    __BGEN_TEST_COL_DANGER=""
+		    __BGEN_TEST_COL_WARNING=""
+		    __BGEN_TEST_COL_SUCCESS=""
+		    __BGEN_TEST_COL_TITLE=""
+		    __BGEN_TEST_COL_FILENAME=""
+		    __BGEN_TEST_COL_RESET=""
+		else
+		    __BGEN_TEST_COL_DANGER="\e[31m"
+		    __BGEN_TEST_COL_WARNING="\e[33m"
+		    __BGEN_TEST_COL_SUCCESS="\e[32m"
+		    __BGEN_TEST_COL_TITLE="\e[36m"
+		    __BGEN_TEST_COL_FILENAME="\e[33m"
+		    __BGEN_TEST_COL_TRIVIAL="\e[90m"
+		    __BGEN_TEST_COL_RESET="\e[0m"
 		fi
 		
-		# report on coverage if requested
-		BGEN_COVERAGE=1
-		if ((BGEN_COVERAGE)); then
-		    __bgen_report_coverage
-		fi
+		__BGEN_COVERAGE_HTML_HEADER=$(
+		    cat <<-"EOF"
+		<html lang="en">
+		<head>
+		    <meta charset="UTF-8">
+		    <title>__COVERAGE_TITLE__</title>
 		
-		if (("${#__test_report[@]}")); then
-		    for test_report in "${__test_report[@]}"; do
-		        echo "$test_report"
-		    done
-		fi
+		    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/themes/prism-coy.min.css"
+		        integrity="sha512-CKzEMG9cS0+lcH4wtn/UnxnmxkaTFrviChikDEk1MAWICCSN59sDWIF0Q5oDgdG9lxVrvbENSV1FtjLiBnMx7Q=="
+		        crossorigin="anonymous" />
+		    <link rel="stylesheet"
+		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.css"
+		        integrity="sha512-cbQXwDFK7lj2Fqfkuxbo5iD1dSbLlJGXGpfTDqbggqjHJeyzx88I3rfwjS38WJag/ihH7lzuGlGHpDBymLirZQ=="
+		        crossorigin="anonymous" />
+		    <link rel="stylesheet"
+		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.css"
+		        integrity="sha512-nXlJLUeqPMp1Q3+Bd8Qds8tXeRVQscMscwysJm821C++9w6WtsFbJjPenZ8cQVMXyqSAismveQJc0C1splFDCA=="
+		        crossorigin="anonymous" />
+		    <style>
+		        body {
+		            font-family: monospace;
+		        }
+		        pre[class*=language-]:before, pre[class*=language-]:after {
+		            display: none;
+		            content: unset;
+		        }
+		        .coverage-file pre {
+		            margin-bottom: 1rem;
+		            font-size: 0.7rem;
+		        }
+		        .line-highlight {
+		            background: linear-gradient(to right,hsl(100deg 89% 63% / 12%) 70%,hsl(105deg 86% 63% / 22%));
+		        }
+		        .coverage-percent {
+		            color: white;
+		            padding: 0 0.1rem;
+		            display: inline-block;
+		            text-align: center;
+		            min-width: 2.2rem;
+		        }
+		        .coverage-rating-h .coverage-percent {
+		            background-color: green;
+		        }
+		        .coverage-rating-m .coverage-percent {
+		            background-color: orange;
+		        }
+		        .coverage-rating-l .coverage-percent {
+		            background-color: red;
+		        }
+		    </style>
+		</head>
+		<body>
+		<div class="coverage-header coverage-rating-__COVERAGE_TOTAL_RATING__">
+		    <div class="stats">
+		        <span class="coverage-percent">__COVERAGE_TOTAL_PERCENT__%</span>
+		        Total (__COVERAGE_TOTAL_COVERED__/__COVERAGE_TOTAL_LINES__)
+		    </div>
+		    <div class="date">
+		        Date: __COVERAGE_DATE__
+		        <a href="#" class="collapse-all">Collapse All</a>
+		        <a href="#" class="expand-all">Expand All</a>
+		    </div>
+		    <hr/>
+		</div>
+		EOF
+		)
 		
-		# exit with error if any test failed
-		if (("${#__test_failed[@]}")); then
-		    exit 1
-		fi
-		BGEN_EOF_1005529662
+		__BGEN_COVERAGE_HTML_FILE=$(
+		    cat <<-"EOF"
+		<details class="coverage-file coverage-rating-__COVERAGE_FILE_RATING__" id="__COVERAGE_FILE_ID__" open>
+		    <summary class="coverage-file-title">
+		        <span class="coverage-percent">__COVERAGE_FILE_PERCENT__%</span>
+		        <span class="coverage-file-name">__COVERAGE_FILE_NAME__</span>
+		        <span class="coverage-covered-lines">(<span
+		                class="covered"
+		            >__COVERAGE_FILE_COVERED__</span>/<span
+		                class="total"
+		            >__COVERAGE_FILE_LINES__</span>)<span>
+		    </summary>
+		    <pre
+		        class="line-numbers" id="pre-__COVERAGE_FILE_ID__" data-line="__COVERAGE_FILE_HUNKS__"
+		    ><code class="language-bash">__COVERAGE_FILE_CODE__</code></pre>
+		</details>
+		EOF
+		)
+		
+		__BGEN_COVERAGE_HTML_FOOTER=$(
+		    cat <<-"EOF"
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/prism.min.js"
+		    integrity="sha512-YBk7HhgDZvBxmtOfUdvX0z8IH2d10Hp3aEygaMNhtF8fSOvBZ16D/1bXZTJV6ndk/L/DlXxYStP8jrF77v2MIg=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/components/prism-bash.min.js"
+		    integrity="sha512-JvRd44DHaJAv/o3wxi/dxhz2TO/jwwX8V5/LTr3gj6QMQ6qNNGXk/psoingLDuc5yZmccOq7XhpVaelIZE4tsQ=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.js"
+		    integrity="sha512-br8H6OngKoLht57WKRU5jz3Vr0vF+Tw4G6yhNN2F3dSDheq4JiaasROPJB1wy7PxPk7kV/+5AIbmoZLxxx7Zow=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.js"
+		    integrity="sha512-MGMi0fbhnsk/a/9vCluWv3P4IOfHijjupSoVYEdke+QQyGBOAaXNXnwW6/IZSH7JLdknDf6FL6b57o+vnMg3Iw=="
+		    crossorigin="anonymous"></script>
+		<script>
+		var collapseBtn = document.querySelector('.collapse-all');
+		if (collapseBtn) {
+		    collapseBtn.addEventListener('click', function(e) {
+		        e.preventDefault();
+		        var elems = document.querySelectorAll('details[open]');
+		        for (var i = 0; i < elems.length; ++i) {
+		            elems[i].open = false;
+		        }
+		    })
+		}
+		var expandBtn = document.querySelector('.expand-all');
+		if (expandBtn) {
+		    expandBtn.addEventListener('click', function(e) {
+		        e.preventDefault();
+		        var elems = document.querySelectorAll('details');
+		        for (var i = 0; i < elems.length; ++i) {
+		            elems[i].open = true;
+		        }
+		    })
+		}
+		</script>
+		</body>
+		</html>
+		EOF
+		)
+		
+		__bgen_test_entrypoint "$@"
+		BGEN_EOF_10591
     )
 # BGEN__INCLUDE_STR_END
     # shellcheck disable=SC2154
@@ -821,7 +1075,7 @@ echo_header() {
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
         default_header=$(
-        cat <<-"BGEN_EOF_1398160919"
+        cat <<-"BGEN_EOF_3954"
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -875,7 +1129,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_1398160919
+			BGEN_EOF_3954
         )
 # BGEN__INCLUDE_STR_END
 
@@ -1062,7 +1316,7 @@ bgen_include_str() {
         bail "bgen:include_str error: cannot import $file"
     fi
 
-    local heredoc_id="$SRANDOM"
+    local heredoc_id="$RANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
     echo "${indent}${variable}=\$("
     echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""
