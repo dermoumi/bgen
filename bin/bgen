@@ -132,6 +132,8 @@ build_tests_to_stdout() {
     local test_funcs=()
     local failed=0
     local no_capture="${BGEN_NO_CAPTURE:-0}"
+    local no_coverage="${BGEN_NO_COVERAGE:-0}"
+    local coverage_file="${BGEN_HTML_REPORT_FILE:-}"
     while (($#)); do
         case "$1" in
         -k)
@@ -142,8 +144,24 @@ build_tests_to_stdout() {
             test_funcs+=("${1/-k=/}")
             shift
             ;;
-        -C | --no-capture)
+        -O | --no-capture)
             no_capture=1
+            shift
+            ;;
+        -C | --no-coverage)
+            no_coverage=1
+            shift
+            ;;
+        -h | --html-report-file)
+            coverage_file="$2"
+            shift 2
+            ;;
+        -h=*)
+            coverage_file="${2/-h=/}"
+            shift
+            ;;
+        --html-report-file=*)
+            coverage_file="${2/--html-report-file=/}"
             shift
             ;;
         *)
@@ -189,10 +207,12 @@ build_tests_to_stdout() {
     echo ")"
 
     echo "BGEN_NO_CAPTURE=$no_capture"
+    echo "BGEN_NO_COVERAGE=$no_coverage"
+    printf "BGEN_HTML_REPORT_FILE=%q\n" "$coverage_file"
 
 # BGEN__INCLUDE_STR_BEGIN
     testlib=$(
-    cat <<-"BGEN_EOF_4857"
+    cat <<-"BGEN_EOF_4130"
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -240,11 +260,11 @@ build_tests_to_stdout() {
 		    fi
 		
 		    # report on coverage if requested
-		    BGEN_COVERAGE=1
-		    BGEN_HTML_REPORT_FILE="coverage.html"
-		    BGEN_COVERAGE_M_THRESHOLD=60
-		    BGEN_COVERAGE_H_THRESHOLD=85
-		    if ((BGEN_COVERAGE)); then
+		    : "${BGEN_NO_COVERAGE:=0}"
+		    : "${BGEN_HTML_REPORT_FILE:=}"
+		    : "${BGEN_COVERAGE_M_THRESHOLD:=60}"
+		    : "${BGEN_COVERAGE_H_THRESHOLD:=85}"
+		    if ! ((BGEN_NO_COVERAGE)); then
 		        printf "\n%bCoverage:%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
 		        __bgen_test_make_coverage_report
 		    fi
@@ -1000,7 +1020,7 @@ build_tests_to_stdout() {
 		)
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_4857
+		BGEN_EOF_4130
     )
 # BGEN__INCLUDE_STR_END
     # shellcheck disable=SC2154
@@ -1085,7 +1105,7 @@ echo_header() {
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
         default_header=$(
-        cat <<-"BGEN_EOF_21318"
+        cat <<-"BGEN_EOF_8580"
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1139,7 +1159,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_21318
+			BGEN_EOF_8580
         )
 # BGEN__INCLUDE_STR_END
 

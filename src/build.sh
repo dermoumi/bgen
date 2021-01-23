@@ -60,6 +60,8 @@ build_tests_to_stdout() {
     local test_funcs=()
     local failed=0
     local no_capture="${BGEN_NO_CAPTURE:-0}"
+    local no_coverage="${BGEN_NO_COVERAGE:-0}"
+    local coverage_file="${BGEN_HTML_REPORT_FILE:-}"
     while (($#)); do
         case "$1" in
         -k)
@@ -70,8 +72,24 @@ build_tests_to_stdout() {
             test_funcs+=("${1/-k=/}")
             shift
             ;;
-        -C | --no-capture)
+        -O | --no-capture)
             no_capture=1
+            shift
+            ;;
+        -C | --no-coverage)
+            no_coverage=1
+            shift
+            ;;
+        -h | --html-report-file)
+            coverage_file="$2"
+            shift 2
+            ;;
+        -h=*)
+            coverage_file="${2/-h=/}"
+            shift
+            ;;
+        --html-report-file=*)
+            coverage_file="${2/--html-report-file=/}"
             shift
             ;;
         *)
@@ -117,6 +135,8 @@ build_tests_to_stdout() {
     echo ")"
 
     echo "BGEN_NO_CAPTURE=$no_capture"
+    echo "BGEN_NO_COVERAGE=$no_coverage"
+    printf "BGEN_HTML_REPORT_FILE=%q\n" "$coverage_file"
 
     bgen:include_str testlib "testlib.sh"
     # shellcheck disable=SC2154

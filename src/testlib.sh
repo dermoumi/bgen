@@ -45,11 +45,11 @@ __bgen_test_entrypoint() {
     fi
 
     # report on coverage if requested
-    BGEN_COVERAGE=1
-    BGEN_HTML_REPORT_FILE="coverage.html"
-    BGEN_COVERAGE_M_THRESHOLD=60
-    BGEN_COVERAGE_H_THRESHOLD=85
-    if ((BGEN_COVERAGE)); then
+    : "${BGEN_NO_COVERAGE:=0}"
+    : "${BGEN_HTML_REPORT_FILE:=}"
+    : "${BGEN_COVERAGE_M_THRESHOLD:=60}"
+    : "${BGEN_COVERAGE_H_THRESHOLD:=85}"
+    if ! ((BGEN_NO_COVERAGE)); then
         printf "\n%bCoverage:%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
         __bgen_test_make_coverage_report
     fi
