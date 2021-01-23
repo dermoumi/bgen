@@ -6,6 +6,24 @@ __bgen_test_entrypoint() {
 
     local coverage_map=()
 
+    # linemap shows at what lines each file starts and ends
+    if [[ ! "${__BGEN_TEST_LINEMAP:-}" ]]; then
+        local linemap=()
+        local line_nr=0
+        while IFS= read -r line; do
+            line_nr=$((line_nr + 1))
+
+            local line="${line#${line%%[![:space:]]*}}" # strip leading whitepsace if any
+            if [[ "$line" =~ ^\#[[:space:]]BGEN__ ]]; then
+                linemap+=("$line_nr ${line:2}")
+            fi
+        done <<<"$BASH_EXECUTION_STRING"
+
+        local linemap_str
+        linemap_str="$(__bgen_test_join_by $'\n' "${linemap[@]}")"
+        export __BGEN_TEST_LINEMAP="$linemap_str"
+    fi
+
     # look over test functions
     for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
         __bgen_test_run_single "$test_func"
@@ -44,14 +62,6 @@ __bgen_test_entrypoint() {
         printf '\n%bAll tests passed successfully %s%b\n' \
             "$__BGEN_TEST_COL_SUCCESS" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
     fi
-}
-
-__bgen_test_get_linemap() {
-    if [[ ! "$__BGEN_LINEMAP__" ]]; then
-        : # To do add linemap generation inside this
-    fi
-
-    echo "$__BGEN_LINEMAP__"
 }
 
 # requires 2 variables: source_file and source_line_nr to be declared
@@ -93,7 +103,7 @@ __bgen_test_get_source_line() {
             # offset the previous item's lines with the linecount of this file
             offsets_stack[0]=$((offsets_stack[0] + file_lines))
         fi
-    done < <(__bgen_test_get_linemap)
+    done <<<"$__BGEN_TEST_LINEMAP"
 
     if declare -p source_file 1>/dev/null 2>&1; then
         source_file="${files_stack[0]/$PWD\//}"
@@ -441,7 +451,6 @@ __bgen_test_make_coverage_report() {
 
             total_lines_stack[0]=$((total_lines_stack[0] + 1))
         fi
-
     done <<<"$BASH_EXECUTION_STRING"
 
     local coverage_percent

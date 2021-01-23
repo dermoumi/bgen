@@ -192,7 +192,7 @@ build_tests_to_stdout() {
 
 # BGEN__INCLUDE_STR_BEGIN
     testlib=$(
-    cat <<-"BGEN_EOF_10591"
+    cat <<-"BGEN_EOF_4857"
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -200,6 +200,24 @@ build_tests_to_stdout() {
 		    local test_reports=()
 		
 		    local coverage_map=()
+		
+		    # linemap shows at what lines each file starts and ends
+		    if [[ ! "${__BGEN_TEST_LINEMAP:-}" ]]; then
+		        local linemap=()
+		        local line_nr=0
+		        while IFS= read -r line; do
+		            line_nr=$((line_nr + 1))
+		
+		            local line="${line#${line%%[![:space:]]*}}" # strip leading whitepsace if any
+		            if [[ "$line" =~ ^\#[[:space:]]BGEN__ ]]; then
+		                linemap+=("$line_nr ${line:2}")
+		            fi
+		        done <<<"$BASH_EXECUTION_STRING"
+		
+		        local linemap_str
+		        linemap_str="$(__bgen_test_join_by $'\n' "${linemap[@]}")"
+		        export __BGEN_TEST_LINEMAP="$linemap_str"
+		    fi
 		
 		    # look over test functions
 		    for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
@@ -223,7 +241,7 @@ build_tests_to_stdout() {
 		
 		    # report on coverage if requested
 		    BGEN_COVERAGE=1
-		    BGEN_HTML_REPORT=1
+		    BGEN_HTML_REPORT_FILE="coverage.html"
 		    BGEN_COVERAGE_M_THRESHOLD=60
 		    BGEN_COVERAGE_H_THRESHOLD=85
 		    if ((BGEN_COVERAGE)); then
@@ -233,24 +251,17 @@ build_tests_to_stdout() {
 		
 		    # exit with error if any test failed
 		    if (("${#failed_tests_funcs[@]}")); then
+		        printf '\n%bSome tests have failed%b\n' "$__BGEN_TEST_COL_DANGER" "$__BGEN_TEST_COL_RESET"
 		        exit 1
+		    else
+		        printf '\n%bAll tests passed successfully %s%b\n' \
+		            "$__BGEN_TEST_COL_SUCCESS" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
 		    fi
-		}
-		
-		__bgen_test_get_linemap() {
-		    if [[ ! "$__BGEN_LINEMAP__" ]]; then
-		        : # To do add linemap generation inside this
-		    fi
-		
-		    echo "$__BGEN_LINEMAP__"
 		}
 		
 		# requires 2 variables: source_file and source_line_nr to be declared
 		__bgen_test_get_source_line() {
 		    local bgen_line="$1"
-		
-		    # make sure extglob is enabled
-		    shopt -s extglob
 		
 		    # stacks to keep track of...
 		    local files_stack=("UNKNOWN_FILE") # which file we're currently processing
@@ -258,30 +269,26 @@ build_tests_to_stdout() {
 		    local offsets_stack=(0)            # how much lines should we offset from this file's linecount
 		
 		    while IFS= read -r line; do
-		        local current_line_nr current_line_type
-		        current_line_nr="$(awk '{printf $1}' <<<"$line")"
-		        current_line_type="$(awk '{printf $2}' <<<"$line")"
+		        # parse the line number
+		        local line="${line#${line%%[![:space:]]*}}" # strip leading whitespace if any
+		        local line_nr="${line%%[[:space:]]*}"       # strip everything from the first space
 		
-		        if ((current_line_nr > bgen_line)); then
+		        if ((line_nr > bgen_line)); then
 		            break
 		        fi
 		
-		        # TODO: Use this instead of awk
-		        # if [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
-		        #     local file="${line/*([[:space:]])\#[[:space:]]BGEN__BEGIN+([[:space:]])/}"
-		
 		        # bash 3.2 seems to complain when i use case .. in .. esac here
-		        if [[ "$current_line_type" == "BGEN__BEGIN" ]]; then
-		            local file
-		            file="$(awk '{OFS=""; $1=""; $2=""; printf $0 }' <<<"$line")"
+		        if [[ "$line" =~ ^[[:digit:]]+[[:space:]]+BGEN__BEGIN[[:space:]]+ ]]; then
+		            : "${line#*BGEN__BEGIN[[:space:]]}"
+		            local file="${_#${_%%[![:space:]]*}}"
 		
 		            # add values related to this file to the new stack
 		            files_stack=("$file" "${files_stack[@]}")
-		            line_nrs_stack=("$current_line_nr" "${line_nrs_stack[@]}")
+		            line_nrs_stack=("$line_nr" "${line_nrs_stack[@]}")
 		            offsets_stack=(0 "${offsets_stack[@]}")
-		        elif [[ "$current_line_type" == "BGEN__END" ]]; then
+		        elif [[ "$line" =~ ^[[:digit:]]+[[:space:]]+BGEN__END[^[:alnum:]]+ ]]; then
 		            local file_start_line_nr="${line_nrs_stack[0]}"
-		            local file_lines=$((current_line_nr - file_start_line_nr))
+		            local file_lines=$((line_nr - file_start_line_nr))
 		
 		            # pop the first item from the stack
 		            files_stack=("${files_stack[@]:1}")
@@ -291,7 +298,7 @@ build_tests_to_stdout() {
 		            # offset the previous item's lines with the linecount of this file
 		            offsets_stack[0]=$((offsets_stack[0] + file_lines))
 		        fi
-		    done < <(__bgen_test_get_linemap)
+		    done <<<"$__BGEN_TEST_LINEMAP"
 		
 		    if declare -p source_file 1>/dev/null 2>&1; then
 		        source_file="${files_stack[0]/$PWD\//}"
@@ -478,7 +485,7 @@ build_tests_to_stdout() {
 		        local coverage_color="$__BGEN_TEST_COL_DANGER"
 		    fi
 		
-		    if ((BGEN_HTML_REPORT)); then
+		    if [[ "$BGEN_HTML_REPORT_FILE" ]]; then
 		        local file_id="${filename_short//[![:alnum:]-_]/_}"
 		
 		        local code
@@ -511,7 +518,7 @@ build_tests_to_stdout() {
 		
 		# print final coverage report
 		__bgen_test_make_coverage_report() {
-		    shopt -s extglob
+		    shopt -u extglob
 		
 		    local html_report=""
 		    local coverage_report=()
@@ -535,10 +542,13 @@ build_tests_to_stdout() {
 		
 		    local line_nr=0
 		    while IFS= read -r line; do
+		        local line="${line#${line%%[![:space:]]*}}" # strip leading whitepsace if any
 		        line_nr=$((line_nr + 1))
 		
-		        if [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
-		            local file="${line/*([[:space:]])\#[[:space:]]BGEN__BEGIN+([[:space:]])/}"
+		        if [[ "$line" =~ ^\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
+		            : "${line#*BGEN__BEGIN[[:space:]]}"
+		            local file="${_#${_%%[![:space:]]*}}"
+		
 		            files_stack=("$file" "${files_stack[@]}")
 		            line_nrs_stack=("$line_nr" "${line_nrs_stack[@]}")
 		            offsets_stack=(0 "${offsets_stack[@]}")
@@ -553,7 +563,7 @@ build_tests_to_stdout() {
 		            is_prev_line_covered_stack=(1 "${is_prev_line_covered_stack[@]}")
 		
 		            continue
-		        elif [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__END[[:space:]] ]]; then
+		        elif [[ "$line" =~ ^\#[[:space:]]BGEN__END[[:space:]] ]]; then
 		            if [[ "${hunk_start_stack[0]}" ]]; then
 		                if [[ "${hunk_start_stack[0]}" == "${hunk_end_stack[0]}" ]]; then
 		                    covered_hunks+=("${hunk_start_stack[0]}")
@@ -636,9 +646,6 @@ build_tests_to_stdout() {
 		
 		            total_lines_stack[0]=$((total_lines_stack[0] + 1))
 		        fi
-		
-		        # printf '%s %s:\t%s\e[30m (%s)\e[0m\n' \
-		        #     "${is_prev_line_covered_stack[0]/0/-}" "$line_nr" "$line" "${hunk_start[0]-}-${hunk_end[0]-}" >&2
 		    done <<<"$BASH_EXECUTION_STRING"
 		
 		    local coverage_percent
@@ -654,8 +661,16 @@ build_tests_to_stdout() {
 		        local coverage_rating="l"
 		    fi
 		
+		    # print file reports
+		    __bgen_test_format_columns "  " < <(
+		        printf '  \t%s\n' "${coverage_report[@]}"
+		        printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
+		            "$__BGEN_TEST_COL_TRIVIAL" "$total_covered" "$total_lines" \
+		            "$coverage_color" "$coverage_percent" "$__BGEN_TEST_COL_RESET"
+		    )
+		
 		    # save html report
-		    if ((BGEN_HTML_REPORT)); then
+		    if [[ "$BGEN_HTML_REPORT_FILE" ]]; then
 		        local coverage_date
 		        coverage_date=$(date)
 		
@@ -669,16 +684,11 @@ build_tests_to_stdout() {
 		        local final_html_report="$html_header"
 		        final_html_report+="$html_report"
 		        final_html_report+="${__BGEN_COVERAGE_HTML_FOOTER}"
-		        echo "$final_html_report" >"coverage.html"
-		    fi
+		        echo "$final_html_report" >"$BGEN_HTML_REPORT_FILE"
 		
-		    # print file reports
-		    __bgen_test_format_columns "  " < <(
-		        printf '  \t%s\n' "${coverage_report[@]}"
-		        printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
-		            "$__BGEN_TEST_COL_TRIVIAL" "$total_covered" "$total_lines" \
-		            "$coverage_color" "$coverage_percent" "$__BGEN_TEST_COL_RESET"
-		    )
+		        printf "\n    %bCoverage report file: %s%b\n" \
+		            "$__BGEN_TEST_COL_TITLE" "$BGEN_HTML_REPORT_FILE" "$__BGEN_TEST_COL_RESET"
+		    fi
 		}
 		
 		# formats tab separated stdin entries as columns
@@ -990,7 +1000,7 @@ build_tests_to_stdout() {
 		)
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_10591
+		BGEN_EOF_4857
     )
 # BGEN__INCLUDE_STR_END
     # shellcheck disable=SC2154
@@ -1075,7 +1085,7 @@ echo_header() {
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
         default_header=$(
-        cat <<-"BGEN_EOF_3954"
+        cat <<-"BGEN_EOF_21318"
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1129,7 +1139,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_3954
+			BGEN_EOF_21318
         )
 # BGEN__INCLUDE_STR_END
 
@@ -1372,15 +1382,8 @@ test_debug_project() {
 }
 
 test_project() {
-    # TODO: Check awk exists
-
-    local test_code linemap
-    test_code="$(build_tests_to_stdout "$@")"
-    linemap="$(awk '$0 ~ /^# BGEN__/ {OFS=""; $1=""; $2=$2 " "; print NR " " $0}' <<<"$test_code")"
-
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
-    export __BGEN_LINEMAP__="$linemap"
-    bash -c "$test_code" "${__base__:-$0} test" "$@"
+    bash -c "$(build_tests_to_stdout "$@")" "${__base__:-$0} test" "$@"
 }
 # BGEN__END /home/sdrm/projects/bgen/src/test.sh
 
