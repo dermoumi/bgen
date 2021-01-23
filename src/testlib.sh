@@ -43,9 +43,6 @@ __BGEN_COVERAGE_HTML_HEADER=$(
         .coverage-file {
             margin-bottom: 2rem;
         }
-        .coverage-file-name:after {
-            content: ':';
-        }
         .line-highlight {
             background: linear-gradient(to right,hsl(100deg 89% 63% / 12%) 70%,hsl(105deg 86% 63% / 22%));
         }
@@ -58,7 +55,16 @@ EOF
 __BGEN_COVERAGE_HTML_FILE=$(
     cat <<-"EOF"
 <div class="coverage-file">
-    <p class="coverage-file-name">__COVERAGE_FILE_NAME__</p>
+    <p class="coverage-file-title">
+        <span class="coverage-file-name">__COVERAGE_FILE_NAME__</span>
+        <span class="coverage-covered-lines">
+            (<span
+                class="covered"
+            >__COVERAGE_FILE_COVERED_LINES__</span>/<span
+                class="total"
+            >__COVERAGE_FILE_TOTAL_LINES__</span>)
+        <span>
+    </p>
     <pre
         class="line-numbers linkable-line-numbers" data-line="__COVERAGE_FILE_LINES__"
     ><code class="language-bash">__COVERAGE_FILE_CODE__</code></pre>
@@ -239,7 +245,9 @@ __bgen_is_line_covered() {
 
 __bgen_add_file_coverage() {
     local filename="$1"
-    local covered_lines="$2"
+    local covered_hunks="$2"
+    local covered_lines_count="$3"
+    local total_lines_count="$4"
 
     local code
     code="$(cat "$filename")"
@@ -248,7 +256,9 @@ __bgen_add_file_coverage() {
 
     local html
     html="${__BGEN_COVERAGE_HTML_FILE/__COVERAGE_FILE_NAME__/${filename/$PWD\//}}"
-    html="${html/__COVERAGE_FILE_LINES__/$covered_lines}"
+    html="${html/__COVERAGE_FILE_COVERED_LINES__/$covered_lines_count}"
+    html="${html/__COVERAGE_FILE_TOTAL_LINES__/$total_lines_count}"
+    html="${html/__COVERAGE_FILE_LINES__/$covered_hunks}"
     html="${html/__COVERAGE_FILE_CODE__/$code}"
 
     coverage_output+="$html"
@@ -262,6 +272,12 @@ __bgen_report_coverage() {
     local line_file=("UNKNOWN_FILE")
     local line_nr=(0)
     local line_offset=(0)
+
+    local covered_file_lines=(0)
+    local total_file_lines=(0)
+
+    local total_covered=0
+    local total_lines=0
 
     local covered_hunks=()
     local covered_hunks_count=(0)
@@ -281,6 +297,9 @@ __bgen_report_coverage() {
             line_nr=("$current_line_nr" "${line_nr[@]}")
             line_offset=(0 "${line_offset[@]}")
 
+            covered_file_lines=(0 "${covered_file_lines[@]}")
+            total_file_lines=(0 "${total_file_lines[@]}")
+
             covered_hunks_count=(0 "${covered_hunks_count[@]}")
             hunk_start=("" "${hunk_start[@]}")
             hunk_end=("" "${hunk_end[@]}")
@@ -299,7 +318,8 @@ __bgen_report_coverage() {
             fi
 
             local file_covered_hunks=("${covered_hunks[@]::${covered_hunks_count[0]}}")
-            __bgen_add_file_coverage "${line_file[0]}" "$(__bgen_join_by "," "${file_covered_hunks[@]}")"
+            __bgen_add_file_coverage "${line_file[0]}" "$(__bgen_join_by "," "${file_covered_hunks[@]}")" \
+                "${covered_file_lines[0]}" "${total_file_lines[0]}"
 
             local file_start="${line_nr[0]}"
             local file_size=$((current_line_nr - file_start))
@@ -308,6 +328,15 @@ __bgen_report_coverage() {
             line_nr=("${line_nr[@]:1}")
             line_offset=("${line_offset[@]:1}")
             line_offset[0]=$((line_offset[0] + file_size))
+
+            total_covered=$((total_covered + covered_file_lines[0]))
+            total_lines=$((total_lines + total_file_lines[0]))
+
+            covered_file_lines=("${covered_file_lines[@]:1}")
+            covered_file_lines[0]=$((covered_file_lines[0] + 1))
+
+            total_file_lines=("${total_file_lines[@]:1}")
+            total_file_lines[0]=$((total_file_lines[0] + 1))
 
             covered_hunks=("${covered_hunks[@]:${covered_hunks_count[0]}}")
             covered_hunks_count=("${covered_hunks_count[@]:1}")
@@ -326,7 +355,6 @@ __bgen_report_coverage() {
             continue
         fi
 
-        # echo "${#line_file[@]}"
         if ((${#line_file[@]} > 1)); then
             if __bgen_is_line_covered "$current_line_nr" "$line"; then
                 if [[ "${hunk_start[0]}" ]]; then
@@ -336,6 +364,8 @@ __bgen_report_coverage() {
                     hunk_start[0]="$line_nr_offset"
                     hunk_end[0]="$line_nr_offset"
                 fi
+
+                covered_file_lines[0]=$((covered_file_lines[0] + 1))
 
                 last_line_is_covered=1
             else
@@ -354,6 +384,8 @@ __bgen_report_coverage() {
                 last_line_is_covered=0
             fi
 
+            total_file_lines[0]=$((total_file_lines[0] + 1))
+
             # printf '%s %s:\t%s\e[30m (%s)\e[0m\n' \
             #     "${last_line_is_covered/0/-}" "$current_line_nr" "$line" "${hunk_start[0]-}-${hunk_end[0]-}" >&2
         fi
@@ -362,6 +394,7 @@ __bgen_report_coverage() {
     coverage_output+="${__BGEN_COVERAGE_HTML_FOOTER}"
     echo "$coverage_output" >"coverage.html"
 
+    echo "covered: $total_covered/$total_lines"
     echo
     echo "totol lines $current_line_nr"
 }
@@ -492,16 +525,16 @@ if (("${#__test_failed[@]}")); then
     done
 fi
 
-if (("${#__test_report[@]}")); then
-    for test_report in "${__test_report[@]}"; do
-        echo "$test_report"
-    done
-fi
-
 # report on coverage if requested
 BGEN_COVERAGE=1
 if ((BGEN_COVERAGE)); then
     __bgen_report_coverage
+fi
+
+if (("${#__test_report[@]}")); then
+    for test_report in "${__test_report[@]}"; do
+        echo "$test_report"
+    done
 fi
 
 # exit with error if any test failed
