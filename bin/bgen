@@ -55,10 +55,10 @@ NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
 
 # BGEN__SHEBANG_REMOVED
 
-# BGEN__BEGIN build.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/build.sh
 # BGEN__SHEBANG_REMOVED
 
-# BGEN__BEGIN utils.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/utils.sh
 # BGEN__SHEBANG_REMOVED
 
 bail() {
@@ -72,7 +72,7 @@ bail() {
 trim_str() {
     echo "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
 }
-# BGEN__END utils.sh
+# BGEN__END /home/sdrm/projects/bgen/src/utils.sh
 
 build_project() {
     # save it in a temp file first
@@ -192,11 +192,12 @@ build_tests_to_stdout() {
 
 # BGEN__INCLUDE_STR_BEGIN
     testlib=$(
-    cat <<-"EOF"
+    cat <<-"BGEN_EOF_968302630"
 		#!/usr/bin/env bash
 		
 		__test_failed=()
 		__test_report=()
+		__bgen_covered_lines=()
 		
 		if [[ "$NO_COLOR" ]]; then
 		    __COL_DANGER=""
@@ -211,6 +212,73 @@ build_tests_to_stdout() {
 		    __COL_FILENAME="\e[33m"
 		    __COL_RESET="\e[0m"
 		fi
+		
+		__BGEN_COVERAGE_HTML_HEADER=$(
+		    cat <<-"EOF"
+		<html lang="en">
+		<head>
+		    <meta charset="UTF-8">
+		    <title>__COVERAGE_TITLE__</title>
+		
+		    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/themes/prism-coy.min.css"
+		        integrity="sha512-CKzEMG9cS0+lcH4wtn/UnxnmxkaTFrviChikDEk1MAWICCSN59sDWIF0Q5oDgdG9lxVrvbENSV1FtjLiBnMx7Q=="
+		        crossorigin="anonymous" />
+		    <link rel="stylesheet"
+		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.css"
+		        integrity="sha512-cbQXwDFK7lj2Fqfkuxbo5iD1dSbLlJGXGpfTDqbggqjHJeyzx88I3rfwjS38WJag/ihH7lzuGlGHpDBymLirZQ=="
+		        crossorigin="anonymous" />
+		    <link rel="stylesheet"
+		        href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.css"
+		        integrity="sha512-nXlJLUeqPMp1Q3+Bd8Qds8tXeRVQscMscwysJm821C++9w6WtsFbJjPenZ8cQVMXyqSAismveQJc0C1splFDCA=="
+		        crossorigin="anonymous" />
+		    <style>
+		        body {
+		            font-family: monospace;
+		        }
+		        .coverage-file {
+		            margin-bottom: 2rem;
+		        }
+		        .coverage-file-name:after {
+		            content: ':';
+		        }
+		        .line-highlight {
+		            background: linear-gradient(to right,hsl(100deg 89% 63% / 12%) 70%,hsl(105deg 86% 63% / 22%));
+		        }
+		    </style>
+		</head>
+		<body>
+		EOF
+		)
+		
+		__BGEN_COVERAGE_HTML_FILE=$(
+		    cat <<-"EOF"
+		<div class="coverage-file">
+		    <p class="coverage-file-name">__COVERAGE_FILE_NAME__</p>
+		    <pre
+		        class="line-numbers linkable-line-numbers" data-line="__COVERAGE_FILE_LINES__"
+		    ><code class="language-bash">__COVERAGE_FILE_CODE__</code></pre>
+		</div>
+		EOF
+		)
+		
+		__BGEN_COVERAGE_HTML_FOOTER=$(
+		    cat <<-"EOF"
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/prism.min.js"
+		    integrity="sha512-YBk7HhgDZvBxmtOfUdvX0z8IH2d10Hp3aEygaMNhtF8fSOvBZ16D/1bXZTJV6ndk/L/DlXxYStP8jrF77v2MIg=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/components/prism-bash.min.js"
+		    integrity="sha512-JvRd44DHaJAv/o3wxi/dxhz2TO/jwwX8V5/LTr3gj6QMQ6qNNGXk/psoingLDuc5yZmccOq7XhpVaelIZE4tsQ=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-numbers/prism-line-numbers.min.js"
+		    integrity="sha512-br8H6OngKoLht57WKRU5jz3Vr0vF+Tw4G6yhNN2F3dSDheq4JiaasROPJB1wy7PxPk7kV/+5AIbmoZLxxx7Zow=="
+		    crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/plugins/line-highlight/prism-line-highlight.min.js"
+		    integrity="sha512-MGMi0fbhnsk/a/9vCluWv3P4IOfHijjupSoVYEdke+QQyGBOAaXNXnwW6/IZSH7JLdknDf6FL6b57o+vnMg3Iw=="
+		    crossorigin="anonymous"></script>
+		</body>
+		</html>
+		EOF
+		)
 		
 		# shellcheck disable=SC2120
 		__get_source_line() {
@@ -278,6 +346,9 @@ build_tests_to_stdout() {
 		__handle_exit() {
 		    local rc="$__bgen_current_rc"
 		
+		    # save coverage file
+		    declare -p __bgen_test_covered_lines >"$__bgen_env_file"
+		
 		    if [[ "${__error_handled:-}" ]]; then
 		        exit "$rc"
 		    fi
@@ -324,8 +395,171 @@ build_tests_to_stdout() {
 		    __bgen_current_rc="$rc"
 		    __bgen_current_cmd="$cmd"
 		    __bgen_current_cmd_line="$line"
+		
+		    __bgen_test_covered_lines[$line]=1
 		}
 		export -f __handle_debug
+		
+		__bgen_join_by() {
+		    if (($# <= 1)); then
+		        return 0
+		    fi
+		
+		    local delimiter="$1"
+		    local first="$2"
+		    shift 2
+		
+		    printf %s "$first" "${@/#/$delimiter}"
+		}
+		
+		__bgen_is_line_covered() {
+		    local nr="$1"
+		    local line="$2"
+		
+		    if [[ "${__bgen_covered_lines[$nr]-}" ]]; then
+		        return 0
+		    fi
+		
+		    if [[ "$line" =~ ^[[:space:]]*[\(\)\{\}]?[[:space:]]*$ ]]; then
+		        ((last_line_is_covered))
+		        return
+		    fi
+		
+		    if [[ "$line" =~ ^[[:space:]]*\# ]]; then
+		        return 0
+		    fi
+		
+		    return 1
+		}
+		
+		__bgen_add_file_coverage() {
+		    local filename="$1"
+		    local covered_lines="$2"
+		
+		    local code
+		    code="$(cat "$filename")"
+		    code="${code//</&lt;}"
+		    code="${code//>/&gt;}"
+		
+		    local html
+		    html="${__BGEN_COVERAGE_HTML_FILE/__COVERAGE_FILE_NAME__/${filename/$PWD\//}}"
+		    html="${html/__COVERAGE_FILE_LINES__/$covered_lines}"
+		    html="${html/__COVERAGE_FILE_CODE__/$code}"
+		
+		    coverage_output+="$html"
+		}
+		
+		__bgen_report_coverage() {
+		    shopt -s extglob
+		
+		    local coverage_output="${__BGEN_COVERAGE_HTML_HEADER}"
+		
+		    local line_file=("UNKNOWN_FILE")
+		    local line_nr=(0)
+		    local line_offset=(0)
+		
+		    local covered_hunks=()
+		    local covered_hunks_count=(0)
+		    local hunk_start=("")
+		    local hunk_end=("")
+		
+		    local last_line_is_covered=0
+		
+		    echo
+		    local current_line_nr=0
+		    while IFS= read -r line; do
+		        current_line_nr=$((current_line_nr + 1))
+		
+		        if [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
+		            local file="${line/*([[:space:]])\#[[:space:]]BGEN__BEGIN+([[:space:]])/}"
+		            line_file=("$file" "${line_file[@]}")
+		            line_nr=("$current_line_nr" "${line_nr[@]}")
+		            line_offset=(0 "${line_offset[@]}")
+		
+		            covered_hunks_count=(0 "${covered_hunks_count[@]}")
+		            hunk_start=("" "${hunk_start[@]}")
+		            hunk_end=("" "${hunk_end[@]}")
+		
+		            continue
+		        elif [[ "$line" =~ ^[[:space:]]*\#[[:space:]]BGEN__END[[:space:]] ]]; then
+		            if [[ "${hunk_start[0]}" ]]; then
+		                if [[ "${hunk_start[0]}" == "${hunk_end[0]}" ]]; then
+		                    covered_hunks+=("${hunk_start[0]}")
+		                else
+		                    covered_hunks+=("${hunk_start[0]}-${hunk_end[0]}")
+		                fi
+		                covered_hunks_count[0]=$((covered_hunks_count[0] + 1))
+		                hunk_start[0]=""
+		                hunk_end[0]=""
+		            fi
+		
+		            local file_covered_hunks=("${covered_hunks[@]::${covered_hunks_count[0]}}")
+		            __bgen_add_file_coverage "${line_file[0]}" "$(__bgen_join_by "," "${file_covered_hunks[@]}")"
+		
+		            local file_start="${line_nr[0]}"
+		            local file_size=$((current_line_nr - file_start))
+		
+		            line_file=("${line_file[@]:1}")
+		            line_nr=("${line_nr[@]:1}")
+		            line_offset=("${line_offset[@]:1}")
+		            line_offset[0]=$((line_offset[0] + file_size))
+		
+		            covered_hunks=("${covered_hunks[@]:${covered_hunks_count[0]}}")
+		            covered_hunks_count=("${covered_hunks_count[@]:1}")
+		            hunk_start=("${hunk_start[@]:1}")
+		            hunk_end=("${hunk_end[@]:1}")
+		
+		            if [[ "${hunk_start[0]}" ]]; then
+		                hunk_end[0]=$((hunk_end[0] + 1))
+		            else
+		                local line_nr_offset=$((current_line_nr - line_nr[0] - line_offset[0]))
+		                hunk_start[0]="$line_nr_offset"
+		                hunk_end[0]="$line_nr_offset"
+		            fi
+		
+		            last_line_is_covered=1
+		            continue
+		        fi
+		
+		        # echo "${#line_file[@]}"
+		        if ((${#line_file[@]} > 1)); then
+		            if __bgen_is_line_covered "$current_line_nr" "$line"; then
+		                if [[ "${hunk_start[0]}" ]]; then
+		                    hunk_end[0]=$((hunk_end[0] + 1))
+		                else
+		                    local line_nr_offset=$((current_line_nr - line_nr[0] - line_offset[0]))
+		                    hunk_start[0]="$line_nr_offset"
+		                    hunk_end[0]="$line_nr_offset"
+		                fi
+		
+		                last_line_is_covered=1
+		            else
+		                if [[ "${hunk_start[0]}" ]]; then
+		                    if [[ "${hunk_start[0]}" == "${hunk_end[0]}" ]]; then
+		                        covered_hunks+=("${hunk_start[0]}")
+		                    else
+		                        covered_hunks+=("${hunk_start[0]}-${hunk_end[0]}")
+		                    fi
+		
+		                    covered_hunks_count[0]=$((covered_hunks_count[0] + 1))
+		                    hunk_start[0]=""
+		                    hunk_end[0]=""
+		                fi
+		
+		                last_line_is_covered=0
+		            fi
+		
+		            # printf '%s %s:\t%s\e[30m (%s)\e[0m\n' \
+		            #     "${last_line_is_covered/0/-}" "$current_line_nr" "$line" "${hunk_start[0]-}-${hunk_end[0]-}" >&2
+		        fi
+		    done <<<"$BASH_EXECUTION_STRING"
+		
+		    coverage_output+="${__BGEN_COVERAGE_HTML_FOOTER}"
+		    echo "$coverage_output" >"coverage.html"
+		
+		    echo
+		    echo "totol lines $current_line_nr"
+		}
 		
 		assert_status() {
 		    local status_code="$?"
@@ -371,10 +605,18 @@ build_tests_to_stdout() {
 		    # shellcheck disable=SC2064
 		    trap "rm '$stderr_file'" EXIT
 		
+		    env_file="$(mktemp)"
+		    # shellcheck disable=SC2064
+		    trap "rm '$env_file'" EXIT
+		    export __bgen_env_file="$env_file"
+		
 		    # we don't want this subshell to cause the entire test to fail
 		    # so we relax bash options until we get a status code
 		    set +o errexit +o errtrace +o nounset +o pipefail
 		    (
+		        # Used to track coverage
+		        __bgen_test_covered_lines=()
+		
 		        # set up some hooks to print original error lines and files
 		        trap '__handle_debug "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
 		        trap 'trap - DEBUG; __handle_error "$LINENO"' ERR
@@ -392,6 +634,11 @@ build_tests_to_stdout() {
 		    ) >"$stdout_file" 2>"$stderr_file"
 		    local err=$?
 		    set -o errexit -o errtrace -o nounset -o pipefail
+		
+		    # Merge covered lines into the global list
+		    local coverage_array
+		    coverage_array="$(cat "$env_file")"
+		    eval "${coverage_array/declare -a __bgen_test_covered_lines=/__bgen_covered_lines+=}"
 		
 		    # print a dot or F depending on test status
 		    if ((err)); then
@@ -446,11 +693,17 @@ build_tests_to_stdout() {
 		    done
 		fi
 		
+		# report on coverage if requested
+		BGEN_COVERAGE=1
+		if ((BGEN_COVERAGE)); then
+		    __bgen_report_coverage
+		fi
+		
 		# exit with error if any test failed
 		if (("${#__test_failed[@]}")); then
 		    exit 1
 		fi
-		EOF
+		BGEN_EOF_968302630
     )
 # BGEN__INCLUDE_STR_END
     # shellcheck disable=SC2154
@@ -535,7 +788,7 @@ echo_header() {
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
         default_header=$(
-        cat <<-"EOF"
+        cat <<-"BGEN_EOF_85549467"
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -589,7 +842,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			EOF
+			BGEN_EOF_85549467
         )
 # BGEN__INCLUDE_STR_END
 
@@ -736,19 +989,22 @@ bgen_import() {
         bail "bgen import error: cannot import '$file'"
     fi
 
+    local source_realpath
+    source_realpath="$(realpath "$source_file")"
+
     # Don't re-import file if it was already imported
-    if ! is_in_array "$(realpath "$source_file")" "${imported_files[@]-}"; then
+    if ! is_in_array "$source_realpath" "${imported_files[@]-}"; then
         # Mark file as imported
-        imported_files+=("$(realpath "$source_file")")
+        imported_files+=("$source_realpath")
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__BEGIN $source_file"
+        echo "# BGEN__BEGIN $source_realpath"
 
         # Do normal file processing
         process_file "$source_file"
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__END $source_file"
+        echo "# BGEN__END $source_realpath"
     fi
 
     # Return 200 to tell check() that we've processed something
@@ -773,13 +1029,14 @@ bgen_include_str() {
         bail "bgen:include_str error: cannot import $file"
     fi
 
+    local heredoc_id="$SRANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
     echo "${indent}${variable}=\$("
-    echo "${indent}cat <<-\"EOF\""
+    echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""
     while IFS= read -r line; do
         echo "$indent_plus$line"
     done <"$file"
-    echo "${indent_plus}EOF"
+    echo "${indent_plus}BGEN_EOF_${heredoc_id}"
     echo "${indent})"
     echo "# BGEN__INCLUDE_STR_END"
 
@@ -803,8 +1060,8 @@ is_in_array() {
 is_declared() {
     declare -p "$@" >/dev/null 2>/dev/null
 }
-# BGEN__END build.sh
-# BGEN__BEGIN run.sh
+# BGEN__END /home/sdrm/projects/bgen/src/build.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/run.sh
 # BGEN__SHEBANG_REMOVED
 
 
@@ -817,8 +1074,8 @@ debug_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
     bash -x -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
 }
-# BGEN__END run.sh
-# BGEN__BEGIN test.sh
+# BGEN__END /home/sdrm/projects/bgen/src/run.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/test.sh
 # BGEN__SHEBANG_REMOVED
 
 
@@ -838,7 +1095,7 @@ test_project() {
     export __BGEN_LINEMAP__="$linemap"
     bash -c "$test_code" "${__base__:-$0} test" "$@"
 }
-# BGEN__END test.sh
+# BGEN__END /home/sdrm/projects/bgen/src/test.sh
 
 # entrypoint
 main() {

@@ -344,19 +344,22 @@ bgen_import() {
         bail "bgen import error: cannot import '$file'"
     fi
 
+    local source_realpath
+    source_realpath="$(realpath "$source_file")"
+
     # Don't re-import file if it was already imported
-    if ! is_in_array "$(realpath "$source_file")" "${imported_files[@]-}"; then
+    if ! is_in_array "$source_realpath" "${imported_files[@]-}"; then
         # Mark file as imported
-        imported_files+=("$(realpath "$source_file")")
+        imported_files+=("$source_realpath")
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__BEGIN $source_file"
+        echo "# BGEN__BEGIN $source_realpath"
 
         # Do normal file processing
         process_file "$source_file"
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__END $source_file"
+        echo "# BGEN__END $source_realpath"
     fi
 
     # Return 200 to tell check() that we've processed something
@@ -381,13 +384,14 @@ bgen_include_str() {
         bail "bgen:include_str error: cannot import $file"
     fi
 
+    local heredoc_id="$SRANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
     echo "${indent}${variable}=\$("
-    echo "${indent}cat <<-\"EOF\""
+    echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""
     while IFS= read -r line; do
         echo "$indent_plus$line"
     done <"$file"
-    echo "${indent_plus}EOF"
+    echo "${indent_plus}BGEN_EOF_${heredoc_id}"
     echo "${indent})"
     echo "# BGEN__INCLUDE_STR_END"
 
