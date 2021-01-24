@@ -33,12 +33,13 @@ build_project_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
+    local project_root=
     local project_name=
     local header_file=
     local entrypoint_file=
     local entrypoint_func=
     local shebang_string=
-    local imports_dir=
+    local import_paths=
     read_project_meta
 
     # build the project
@@ -52,11 +53,12 @@ build_tests_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
+    local project_root=
     local project_name=
     local header_file=
     local tests_dir=
     local shebang_string=
-    local imports_dir=
+    local import_paths=
     read_project_meta
 
     # make sure tests directory exists
@@ -152,71 +154,65 @@ build_tests_to_stdout() {
 
 # shellcheck disable=SC2034
 read_project_meta() {
-    local meta_filename="meta.sh"
-    local meta_file_path=""
+    is_declared import_paths || local import_paths
 
-    # shellcheck disable=SC2154
-    if [[ -f "$PWD/$meta_filename" ]]; then
-        meta_file_path="$PWD/$meta_filename"
-    elif [[ -f "$__dir__/$meta_filename" ]]; then
-        meta_file_path="$__dir__/$meta_filename"
+    # make sure some vars are local if not declared on a parent scope
+    is_declared project_root || local project_root
+    is_declared project_name || local project_name
+    is_declared header_file || local header_file
+    is_declared entrypoint_file || local entrypoint_file
+    is_declared entrypoint_func || local entrypoint_func
+    is_declared shebang_string || local shebang_string
+    is_declared output_file || local output_file
+    is_declared tests_dir || local tests_dir
+
+    # set some defaults
+    entrypoint_file="src/main.sh"
+    shebang_string="#!/usr/bin/env bash"
+    tests_dir="tests"
+
+    local import_paths_extra=()
+    import_paths=()
+    if [[ "${BGEN_IMPORT_PATHS:-}" ]]; then
+        while read -r -d ':' path; do
+            import_paths+=("$path")
+        done <<<"${BGEN_IMPORT_PATHS}:"
+    fi
+    import_paths+=(deps/*/lib)
+
+    # source config file
+    project_root="$PWD"
+    while true; do
+        # shellcheck disable=SC1091
+        if [[ -f ".bgenrc" ]]; then
+            project_root="$PWD"
+            source ".bgenrc"
+            break
+        elif [[ -f "bgenrc.sh" ]]; then
+            project_root="$PWD"
+            source "bgenrc.sh"
+            break
+        fi
+
+        if [[ "$PWD" == "/" ]]; then
+            break
+        fi
+
+        cd ..
+    done
+
+    # set default project name
+    if [[ ! "${project_name:-}" ]]; then
+        project_name=$(basename "$PWD")
     fi
 
-    local meta_dir
-    if [[ -e "$meta_file_path" ]]; then
-        meta_dir=$(dirname "$meta_file_path")
-
-        # shellcheck disable=SC1090
-        source "$meta_file_path"
-    else
-        meta_dir="$PWD"
+    # set default output file
+    if [[ ! "${output_file:-}" ]]; then
+        output_file="bin/$project_name"
     fi
 
-    # get project name
-    local bgen_project_name
-    if [[ "${bgen_project_name:-}" ]]; then
-        bgen_project_name="$bgen_project_name"
-    else
-        bgen_project_name=$(basename "$meta_dir")
-    fi
-    if is_declared project_name; then
-        project_name="$bgen_project_name"
-    fi
-
-    # get header file
-    if is_declared header_file; then
-        header_file="${bgen_header_file:-}"
-    fi
-
-    # get entrypoint file
-    if is_declared entrypoint_file; then
-        entrypoint_file="${bgen_entrypoint_file:-"$meta_dir/src/main.sh"}"
-    fi
-
-    # get entrypoint func
-    if is_declared entrypoint_func; then
-        entrypoint_func="${bgen_entrypoint_func:-}"
-    fi
-
-    # get shebang string
-    if is_declared shebang_string; then
-        shebang_string="${bgen_shebang_string:-"#!/usr/bin/env bash"}"
-    fi
-
-    # get output file
-    if is_declared output_file; then
-        output_file="${bgen_output_file:-"$meta_dir/bin/$bgen_project_name"}"
-    fi
-
-    # tests dir
-    if is_declared tests_dir; then
-        tests_dir="${bgen_tests_dir:-"$meta_dir/tests"}"
-    fi
-
-    # imports dir
-    if is_declared imports_dir; then
-        imports_dir="${bgen_imports_dir:-"$meta_dir/deps"}"
-    fi
+    # add the extra import paths
+    import_paths=("${import_paths_extra[@]}" "${import_paths[@]}")
 }
 
 echo_header() {
@@ -348,15 +344,22 @@ find_source_file() {
     fi
 
     # Check in import directories
-    for dir in "${imports_dir[@]}"; do
-        if [[ -f "$dir/$file" ]]; then
-            echo "$dir/$file"
-            return
-        fi
-        if [[ -f "$dir/${file}.sh" ]]; then
-            echo "$dir/${file}.sh"
-            return
-        fi
+    for unexpanded_dir in "${import_paths[@]}"; do
+        for dir in $unexpanded_dir; do
+            # make sure external files are always imported relative to project dir
+            if [[ "$dir" != /* ]]; then
+                dir="${project_root:$PWD}/$dir"
+            fi
+
+            if [[ -f "$dir/$file" ]]; then
+                echo "$dir/$file"
+                return
+            fi
+            if [[ -f "$dir/${file}.sh" ]]; then
+                echo "$dir/${file}.sh"
+                return
+            fi
+        done
     done
 }
 
