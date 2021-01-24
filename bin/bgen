@@ -157,11 +157,11 @@ build_tests_to_stdout() {
             shift 2
             ;;
         -h=*)
-            coverage_file="${2/-h=/}"
+            coverage_file="${1/-h=/}"
             shift
             ;;
-        --html-report-file=*)
-            coverage_file="${2/--html-report-file=/}"
+        --html-report=*)
+            coverage_file="${1/--html-report=/}"
             shift
             ;;
         *)
@@ -210,9 +210,9 @@ build_tests_to_stdout() {
     echo "BGEN_NO_COVERAGE=$no_coverage"
     printf "BGEN_HTML_REPORT_FILE=%q\n" "$coverage_file"
 
+    local testlib
 # BGEN__INCLUDE_STR_BEGIN
-    testlib=$(
-    cat <<-"BGEN_EOF_4130"
+    read -r -d '' testlib <<-"BGEN_EOF_997232248" || :
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -1020,10 +1020,9 @@ build_tests_to_stdout() {
 		)
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_4130
-    )
+		BGEN_EOF_997232248
 # BGEN__INCLUDE_STR_END
-    # shellcheck disable=SC2154
+
     echo "$testlib"
 }
 
@@ -1104,8 +1103,7 @@ echo_header() {
     else
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
-        default_header=$(
-        cat <<-"BGEN_EOF_8580"
+        read -r -d '' default_header <<-"BGEN_EOF_694524047" || :
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1159,8 +1157,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_8580
-        )
+			BGEN_EOF_694524047
 # BGEN__INCLUDE_STR_END
 
         echo "$default_header"
@@ -1331,30 +1328,30 @@ bgen_import() {
 bgen_include_str() {
     local variable="${1:-}"
     local file="${2:-}"
-    if [[ ! "$variable" || ! "$file" ]]; then
+    if ! [[ "$variable" && "$file" ]]; then
         bail "bgen:include_str requires 2 parameters (variable name and filename)"
     fi
 
+    local TAB_SIZE=4
+
     local indent_size="${indent_size:-0}"
-    local tabs=$((indent_size / 4))
+    local tabs=$((indent_size / TAB_SIZE))
     local indent
     indent=$(printf "%${indent_size}s")
     indent_plus=$(printf '\t%.0s' $(seq $((tabs + 1))))
 
-    # Raise error if file does not exit
-    if [[ ! -f "$file" ]]; then
-        bail "bgen:include_str error: cannot import $file"
+    # Raise error if file does not exit or is not readable
+    if ! [[ -f "$file" && -r "$file" ]]; then
+        bail "bgen:include_str error: cannot include $file"
     fi
 
-    local heredoc_id="$RANDOM"
+    local heredoc_id="$RANDOM$RANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
-    echo "${indent}${variable}=\$("
-    echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""
+    echo "${indent}read -r -d '' ${variable} <<-\"BGEN_EOF_${heredoc_id}\" || :"
     while IFS= read -r line; do
         echo "$indent_plus$line"
     done <"$file"
     echo "${indent_plus}BGEN_EOF_${heredoc_id}"
-    echo "${indent})"
     echo "# BGEN__INCLUDE_STR_END"
 
     # Return 200 to tell check() that we've processed something

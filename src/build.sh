@@ -85,11 +85,11 @@ build_tests_to_stdout() {
             shift 2
             ;;
         -h=*)
-            coverage_file="${2/-h=/}"
+            coverage_file="${1/-h=/}"
             shift
             ;;
-        --html-report-file=*)
-            coverage_file="${2/--html-report-file=/}"
+        --html-report=*)
+            coverage_file="${1/--html-report=/}"
             shift
             ;;
         *)
@@ -138,8 +138,9 @@ build_tests_to_stdout() {
     echo "BGEN_NO_COVERAGE=$no_coverage"
     printf "BGEN_HTML_REPORT_FILE=%q\n" "$coverage_file"
 
+    local testlib
     bgen:include_str testlib "testlib.sh"
-    # shellcheck disable=SC2154
+
     echo "$testlib"
 }
 
@@ -389,30 +390,30 @@ bgen_import() {
 bgen_include_str() {
     local variable="${1:-}"
     local file="${2:-}"
-    if [[ ! "$variable" || ! "$file" ]]; then
+    if ! [[ "$variable" && "$file" ]]; then
         bail "bgen:include_str requires 2 parameters (variable name and filename)"
     fi
 
+    local TAB_SIZE=4
+
     local indent_size="${indent_size:-0}"
-    local tabs=$((indent_size / 4))
+    local tabs=$((indent_size / TAB_SIZE))
     local indent
     indent=$(printf "%${indent_size}s")
     indent_plus=$(printf '\t%.0s' $(seq $((tabs + 1))))
 
-    # Raise error if file does not exit
-    if [[ ! -f "$file" ]]; then
-        bail "bgen:include_str error: cannot import $file"
+    # Raise error if file does not exit or is not readable
+    if ! [[ -f "$file" && -r "$file" ]]; then
+        bail "bgen:include_str error: cannot include $file"
     fi
 
-    local heredoc_id="$RANDOM"
+    local heredoc_id="$RANDOM$RANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
-    echo "${indent}${variable}=\$("
-    echo "${indent}cat <<-\"BGEN_EOF_${heredoc_id}\""
+    echo "${indent}read -r -d '' ${variable} <<-\"BGEN_EOF_${heredoc_id}\" || :"
     while IFS= read -r line; do
         echo "$indent_plus$line"
     done <"$file"
     echo "${indent_plus}BGEN_EOF_${heredoc_id}"
-    echo "${indent})"
     echo "# BGEN__INCLUDE_STR_END"
 
     # Return 200 to tell check() that we've processed something
