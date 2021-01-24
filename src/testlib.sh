@@ -131,10 +131,15 @@ __bgen_test_error_handler() {
     local rc="$__bgen_test_current_rc"
 
     # get error line number
-    if ((BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4)) && [[ "${__bgen_assert_line:-}" ]]; then
-        # bash version 4.0 to 4.3 only call the handler AFTER the returning function was left
+    if [[ "${__bgen_assert_line:-}" ]]; then
+        # bash versions <=4.3 only call the handler AFTER the returning function was left
         # the workaround here is to have assert functions to keep track of the line they left at instead
-        local line_nr=$((__bgen_assert_line + 1))
+        local line_nr="$__bgen_assert_line"
+
+        # once again seems bash versions <=5.0 totally ignore the shebang's line
+        if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
+            line_nr=$((line_nr + 1))
+        fi
     elif [[ "$__bgen_test_current_cmd" == "$__bgen_test_prev_cmd" ]]; then
         # if we have two successive return commands, use the previous one's line
         # workaround for when bash reports the return AFTER the returning to the parent function
@@ -560,7 +565,10 @@ assert_status() {
     [[ "$status_code" == "$expected_code" ]] && return 0
 
     echo "assert_status: expected $expected_code, got $status_code" >&2
+
+    # save line at which this happened, used later for reporting
     __bgen_assert_line="${BASH_LINENO[0]-}"
+
     return 1
 }
 export -f assert_status
@@ -578,7 +586,10 @@ assert_eq() {
         echo "assert_eq got:"
         echo "$right"
     ) >&2
+
+    # save line at which this happened, used later for reporting
     __bgen_assert_line="${BASH_LINENO[0]-}"
+
     return 1
 }
 export -f assert_eq
