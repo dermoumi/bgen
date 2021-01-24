@@ -33,7 +33,12 @@ build_project_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
-    local project_name="" header_file="" entrypoint_file="" entrypoint_func="" shebang_string="" imports_dir=""
+    local project_name=
+    local header_file=
+    local entrypoint_file=
+    local entrypoint_func=
+    local shebang_string=
+    local imports_dir=
     read_project_meta
 
     # build the project
@@ -47,7 +52,11 @@ build_tests_to_stdout() {
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
 
-    local project_name="" header_file="" tests_dir="" shebang_string="" imports_dir=""
+    local project_name=
+    local header_file=
+    local tests_dir=
+    local shebang_string=
+    local imports_dir=
     read_project_meta
 
     # make sure tests directory exists
@@ -125,14 +134,11 @@ build_tests_to_stdout() {
         bgen_import "$test_file" || { check && true; }
     done
 
-    echo "__BGEN_TEST_FUNCS__=("
     if ((${#test_funcs[@]})); then
+        echo "__BGEN_TEST_FUNCS__=("
         printf '    %q\n' "${test_funcs[@]}"
-    else
-        # shellcheck disable=SC2028
-        echo "\$(declare -F | awk '\$3 ~ /^ *test_/ {printf \"%s\n\", \$3}')"
+        echo ")"
     fi
-    echo ")"
 
     echo "BGEN_NO_CAPTURE=$no_capture"
     echo "BGEN_NO_COVERAGE=$no_coverage"
@@ -296,19 +302,21 @@ process_shebang() {
 process_directive() {
     local line="$1"
 
-    local trimmed_line
-    trimmed_line=$(trim_str "$line")
-
-    if ! [[ "$trimmed_line" =~ ^bgen\: ]]; then
+    if ! [[ "$line" =~ ^[[:space:]]*bgen\: ]]; then
         return 0
     fi
 
-    local indent_size
-    indent_size=$(echo "" | awk -v l="$line" -v t="$trimmed_line" '{print index(l, t) - 1}')
+    : "${line%%[![:space:]]*}"
+    local indent_size=${#_}
 
-    # shellcheck disable=2001
-    declare -a "args=( $(echo "$trimmed_line" | sed -e 's/\([`$\(\)]\)/\\\1/g') )"
+    # escape `` and $()
+    : "${line//\`/\\\`}"
+    : "${_//\$/\\\$}"
+    : "${_//\(/\\\(}"
+    : "${_//\)/\\/)}"
 
+    # parse arguments
+    declare -a "args=( $_ )"
     if (("${#args[@]}" == 0)); then
         return 0
     fi

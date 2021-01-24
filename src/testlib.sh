@@ -25,9 +25,20 @@ __bgen_test_entrypoint() {
     fi
 
     # look over test functions
-    for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
-        __bgen_test_run_single "$test_func"
-    done
+    if declare -p __BGEN_TEST_FUNCS__ >/dev/null 2>&1; then
+        # bgen test created a variable with specific tests to run
+        for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
+            __bgen_test_run_single "$test_func"
+        done
+    else
+        # no specific tests to run, find and run all tests that start with test_xxxx
+        while IFS= read -r line; do
+            if [[ "$line" == "declare -f test_"[[:alnum:]]* ]]; then
+                local test_func="${line#${line%%test_*}}"
+                __bgen_test_run_single "$test_func"
+            fi
+        done < <(declare -F)
+    fi
     echo
 
     if (("${#test_reports[@]}")); then

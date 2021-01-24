@@ -9,5 +9,6 @@ bail() {
 }
 
 trim_str() {
-    echo "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+    : "${1#"${1%%[![:space:]]*}"}"
+    echo "${_%"${_##*[![:space:]]}"}"
 }
