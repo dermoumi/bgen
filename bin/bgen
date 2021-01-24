@@ -89,9 +89,11 @@ build_project() {
     local output_file=""
     read_project_meta
 
+    # get output_file's directory
+    : "${output_file%/*}"
+    local output_dir="${_:-/}"
+
     # make sure the output's directory exists
-    local output_dir
-    output_dir=$(dirname "$output_file")
     if [[ "$output_dir" && "$output_dir" != "." ]]; then
         mkdir -p "$output_dir"
     fi
@@ -195,7 +197,8 @@ build_tests_to_stdout() {
         exit 1
     elif ! ((${#test_files[@]})); then
         for file in "$tests_dir"/*; do
-            if [[ "$(basename "$file")" != "_"* ]]; then
+            # ${file##*/} keeps only what's after the last slash (aka the basename)
+            if [[ "${file##*/}" != "_"* ]]; then
                 test_files+=("$file")
             fi
         done
@@ -217,11 +220,11 @@ build_tests_to_stdout() {
 
     echo "BGEN_NO_CAPTURE=$no_capture"
     echo "BGEN_NO_COVERAGE=$no_coverage"
-    printf "BGEN_HTML_REPORT_FILE=%q\n" "$coverage_file"
+    printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 
     local testlib
 # BGEN__INCLUDE_STR_BEGIN
-    read -r -d '' testlib <<-"BGEN_EOF_2655229820" || :
+    read -r -d '' testlib <<-"BGEN_EOF_55588219" || :
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -1070,10 +1073,9 @@ build_tests_to_stdout() {
 		)
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_2655229820
+		BGEN_EOF_55588219
 # BGEN__INCLUDE_STR_END
-
-    echo "$testlib"
+    process_input <<<"$testlib"
 }
 
 # shellcheck disable=SC2034
@@ -1127,7 +1129,8 @@ read_project_meta() {
 
     # set default project name
     if [[ ! "${project_name:-}" ]]; then
-        project_name=$(basename "$PWD")
+        # ${file##*/} keeps only what's after the last slash (aka the basename)
+        project_name="${PWD##*/}"
     fi
 
     # set default output file
@@ -1147,7 +1150,7 @@ echo_header() {
     else
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
-        read -r -d '' default_header <<-"BGEN_EOF_146252101" || :
+        read -r -d '' default_header <<-"BGEN_EOF_2783322269" || :
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1201,7 +1204,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_146252101
+			BGEN_EOF_2783322269
 # BGEN__INCLUDE_STR_END
 
         echo "$default_header"
@@ -1213,13 +1216,18 @@ echo_header() {
 
 process_file() {
     local file="$1"
+    file=$(find_file "$file")
 
-    file=$(realpath "$file")
+    # get directory name
+    : "${file%/*}"
+    local src_dir="${_:-/}"
 
-    local src_dir
-    src_dir=$(dirname "$file")
-    pushd "$src_dir" >/dev/null || exit
+    pushd "$src_dir" >/dev/null || return
+    process_input <"$file"
+    popd >/dev/null || return
+}
 
+process_input() {
     local found_first_line=
     while IFS= read -r line; do
         # Process source directives that point ot static files
@@ -1238,9 +1246,7 @@ process_file() {
 
         # Otherwise echo the line as is
         echo "$line"
-    done <"$file"
-
-    popd >/dev/null || exit
+    done
 }
 
 echo_entrypoint_call() {
@@ -1303,100 +1309,101 @@ process_directive() {
     case "$directive" in
     "bgen:import") bgen_import "${args[@]}" ;;
     "bgen:include_str") bgen_include_str "${args[@]}" ;;
+    "bgen:include") bgen_include "${args[@]}" ;;
     "bgen:"*) bail "unknown bgen directive: $directive" ;;
     *) ;;
     esac
 }
 
-find_source_file() {
-    local file="${1:-}"
+find_file() {
+    local file="$1"
 
-    # If the file exists, return it
-    if [[ -f "$file" ]]; then
-        echo "$file"
+    # check if the file exists
+    if [[ -r "$file" ]]; then
+        if [[ "$file" != /* ]]; then
+            echo "$PWD/$file"
+        else
+            echo "$file"
+        fi
         return
     fi
 
-    # Check if there exists a file with `.sh` appended to it
-    if [[ -f "${file}.sh" ]]; then
-        echo "${file}.sh"
-        return
-    fi
-
-    # Check in import directories
+    # check in import directories
     for unexpanded_dir in "${import_paths[@]}"; do
         for dir in $unexpanded_dir; do
             # make sure external files are always imported relative to project dir
             if [[ "$dir" != /* ]]; then
-                dir="${project_root:$PWD}/$dir"
+                dir="${project_root:-$PWD}/$dir"
             fi
 
-            if [[ -f "$dir/$file" ]]; then
+            if [[ -r "$dir/$file" ]]; then
                 echo "$dir/$file"
-                return
-            fi
-            if [[ -f "$dir/${file}.sh" ]]; then
-                echo "$dir/${file}.sh"
                 return
             fi
         done
     done
+
+    # nothing found :(
+    echo "file does not exist or is not readable: $file" >&2
+    return 1
+}
+
+find_source_file() {
+    local file="$1"
+
+    find_file "${file}.sh" 2>/dev/null || find_file "$file"
 }
 
 bgen_import() {
-    local file="${1:-}"
-    if [[ ! "$file" ]]; then
-        bail "bgen:import requires 1 parameter (filename)"
-    fi
-
-    # Raise error if file does not exit
-    local source_file
-    source_file=$(find_source_file "${1:-}")
-    if [[ ! -f "$source_file" ]]; then
-        bail "bgen import error: cannot import '$file'"
-    fi
-
-    local source_realpath
-    source_realpath="$(realpath "$source_file")"
+    local file
+    file=$(find_source_file "$1")
 
     # Don't re-import file if it was already imported
-    if ! is_in_array "$source_realpath" "${imported_files[@]-}"; then
+    if ! is_in_array "$file" "${imported_files[@]-}"; then
         # Mark file as imported
-        imported_files+=("$source_realpath")
+        imported_files+=("$file")
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__BEGIN $source_realpath"
+        echo "# BGEN__BEGIN $file"
 
         # Do normal file processing
-        process_file "$source_file"
+        process_file "$file"
 
         # Add a comment indicating where the processing starts
-        echo "# BGEN__END $source_realpath"
+        echo "# BGEN__END $file"
     fi
 
     # Return 200 to tell check() that we've processed something
     return 200
 }
 
+bgen_include() {
+    local file
+    file=$(find_source_file "$1")
+
+    # Add a comment indicating where the processing starts
+    echo "# BGEN__BEGIN $file"
+
+    # Do normal file processing
+    process_file "$file"
+
+    # Add a comment indicating where the processing starts
+    echo "# BGEN__END $file"
+
+    return 200
+}
+
 bgen_include_str() {
-    local variable="${1:-}"
-    local file="${2:-}"
-    if ! [[ "$variable" && "$file" ]]; then
-        bail "bgen:include_str requires 2 parameters (variable name and filename)"
-    fi
+    local variable="$1"
+    local file="$2"
+    file=$(find_file "$file")
 
     local TAB_SIZE=4
-
     local indent_size="${indent_size:-0}"
     local tabs=$((indent_size / TAB_SIZE))
     local indent
     indent=$(printf "%${indent_size}s")
     indent_plus=$(printf '\t%.0s' $(seq $((tabs + 1))))
-
-    # Raise error if file does not exit or is not readable
-    if ! [[ -f "$file" && -r "$file" ]]; then
-        bail "bgen:include_str error: cannot include $file"
-    fi
 
     local heredoc_id="$RANDOM$RANDOM"
     echo "# BGEN__INCLUDE_STR_BEGIN"
