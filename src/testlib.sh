@@ -24,11 +24,15 @@ __bgen_test_entrypoint() {
         export __BGEN_TEST_LINEMAP="$linemap_str"
     fi
 
-    # look over test functions
+    # loop over test functions
+    printf "%bRunning tests...%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
+    local passed_test_count=0
+    local total_test_count=0
     if declare -p __BGEN_TEST_FUNCS__ >/dev/null 2>&1; then
         # bgen test created a variable with specific tests to run
         for test_func in "${__BGEN_TEST_FUNCS__[@]}"; do
             __bgen_test_run_single "$test_func"
+            total_test_count=$((total_test_count + 1))
         done
     else
         # no specific tests to run, find and run all tests that start with test_xxxx
@@ -36,6 +40,7 @@ __bgen_test_entrypoint() {
             if [[ "$line" == "declare -f test_"[[:alnum:]]* ]]; then
                 local test_func="${line#${line%%test_*}}"
                 __bgen_test_run_single "$test_func"
+                total_test_count=$((total_test_count + 1))
             fi
         done < <(declare -F)
     fi
@@ -65,13 +70,21 @@ __bgen_test_entrypoint() {
         __bgen_test_make_coverage_report
     fi
 
+    local n_tests
+    if ((total_test_count == 1)); then
+        n_tests="1 test"
+    else
+        n_tests="$(printf '%s tests' "$total_test_count")"
+    fi
+
     # exit with error if any test failed
     if (("${#failed_tests_funcs[@]}")); then
-        printf '\n%bSome tests have failed%b\n' "$__BGEN_TEST_COL_DANGER" "$__BGEN_TEST_COL_RESET"
+        printf '\n%b%s/%s passed successfully%b\n' \
+            "$__BGEN_TEST_COL_DANGER" "$passed_test_count" "$n_tests" "$__BGEN_TEST_COL_RESET"
         exit 1
     else
-        printf '\n%bAll tests passed successfully %s%b\n' \
-            "$__BGEN_TEST_COL_SUCCESS" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
+        printf '\n%b%s passed successfully %s%b\n' \
+            "$__BGEN_TEST_COL_SUCCESS" "$n_tests" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
     fi
 }
 
@@ -160,7 +173,7 @@ __bgen_test_error_handler() {
     local source_file=""
     local source_line_nr=""
     __bgen_test_get_source_line "$line_nr"
-    printf '%b%s:%s (rc=%s)%b\n' \
+    printf '%b%s:%s (status: %s)%b\n' \
         "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
 
     # exit with the same return code we came with
@@ -202,7 +215,7 @@ __bgen_test_exit_handler() {
     local source_file=""
     local source_line_nr=""
     __bgen_test_get_source_line "$line_nr"
-    printf '%b%s:%s (rc=%s)%b\n' \
+    printf '%b%s:%s (status: %s)%b\n' \
         "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
 
     # exit with the same return code we came with
@@ -483,7 +496,7 @@ __bgen_test_make_coverage_report() {
     fi
 
     # print file reports
-    __bgen_test_format_columns "  " < <(
+    __bgen_test_format_columns < <(
         printf '  \t%s\n' "${coverage_report[@]}"
         printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
             "$__BGEN_TEST_COL_TRIVIAL" "$total_covered" "$total_lines" \
@@ -513,8 +526,13 @@ __bgen_test_make_coverage_report() {
 }
 
 # formats tab separated stdin entries as columns
+# shellcheck disable=SC2120
 __bgen_test_format_columns() {
-    local separator="${1:-' '}"
+    local separator="${1:-  }"
+
+    if column -o "$separator" -s $'\t' -t -L; then
+        return
+    fi
 
     # parse manually
     local column_widths=()
@@ -653,6 +671,7 @@ __bgen_test_run_single() {
         printf "%bF%b" "$__BGEN_TEST_COL_DANGER" "$__BGEN_TEST_COL_RESET"
         failed_tests_funcs+=("$test_func")
     else
+        passed_test_count=$((passed_test_count + 1))
         printf "%b.%b" "$__BGEN_TEST_COL_SUCCESS" "$__BGEN_TEST_COL_RESET"
     fi
 
