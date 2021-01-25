@@ -260,18 +260,19 @@ __bgen_test_debug_handler() {
         export __bgen_previous_rc=0
         export __bgen_test_prev_cmd=
         export __bgen_test_prev_line_nr=1
-    elif ((__bgen_previous_rc == 0)); then
+    else
         export __bgen_previous_rc=$__bgen_test_current_rc
-        export __bgen_test_prev_cmd=$__bgen_test_current_cmd
-        export __bgen_test_prev_line_nr=$__bgen_test_current_line_nr
+        if ((__bgen_previous_rc == 0)); then
+            export __bgen_test_prev_cmd=$__bgen_test_current_cmd
+            export __bgen_test_prev_line_nr=$__bgen_test_current_line_nr
+        fi
     fi
 
-    if [[ "${__bgen_test_prev_subshell:-}" != "$BASH_SUBSHELL" ]]; then
+    if [[ "${__bgen_test_main_subshell:-}" != "$BASH_SUBSHELL" ]]; then
         trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO" 1' EXIT
-        export __bgen_test_prev_subshell=$BASH_SUBSHELL
 
         # special case for multiline output subshells "$(\n ... )"
-        if [[ "${__bgen_test_prev_cmd}" == *$'\n'* ]]; then
+        if [[ "$__bgen_test_prev_cmd" == *$'\n'* ]]; then
             # calculate number of lines by removing all \n chars
             # and getting character difference from the original string
             : "${__bgen_test_prev_cmd//$'\n'/}"
@@ -294,6 +295,17 @@ __bgen_test_debug_handler() {
         __bgen_test_covered_lines[$line_nr]=1
     fi
     export __bgen_test_current_line_nr=$line_nr
+
+    if [[ "${XTRACE:-}" == "extra" ]]; then
+        local source_line_nr=
+        local source_file=
+        __bgen_test_get_source_line "$line_nr"
+        printf -- '- %s %s %-4s %-4s %s %s\n' "$__bgen_test_main_subshell" "$BASH_SUBSHELL" \
+            "$source_line_nr" "$line_nr" \
+            "${__bgen_test_covered_lines[$line_nr]}" "$cmd" >&2
+    elif [[ "${XTRACE:-}" ]]; then
+        printf -- '- %-4s %s %s\n' "$line_nr" "${__bgen_test_covered_lines[$line_nr]}" "$cmd" >&2
+    fi
 
     # restore the original value of $_
     : "$old_"
@@ -458,6 +470,7 @@ __bgen_test_extend_coverage_hunk() {
         hunk_start=$line_nr_offset
         hunk_end=$line_nr_offset
     fi
+    file_covered_lines=$((file_covered_lines + pending_lines + 1))
 }
 
 __bgen_test_close_coverage_hunk() {
@@ -471,6 +484,67 @@ __bgen_test_close_coverage_hunk() {
         hunk_start=
         hunk_end=
     fi
+}
+
+__bgen_test_contains_str_start() {
+    local str=$1
+    if [[ "$str" != *[\'\"]* || "$str" =~ ^[[:space:]]*\# ]]; then
+        return 1
+    fi
+
+    local i=$str_search_offset
+    str_search_offset=0
+    quote_type=
+    while ((i < ${#str})); do
+        # printf "${str:$i:1}"
+        if [[ "${str:$i:1}" =~ [\'\"] ]] && ( ((i == 0)) || [[ "${str:$((i - 1)):1}" != \\ ]]); then
+            if [[ ! "$quote_type" ]]; then
+                quote_type=${str:$i:1}
+            elif [[ "${str:$i:1}" == "$quote_type" ]]; then
+                quote_type=
+            fi
+        fi
+        i=$((i + 1))
+    done
+    # echo
+
+    [[ "$quote_type" ]]
+}
+
+__bgen_test_contains_str_end() {
+    local str=$1
+    local quote_type=$2
+
+    if ! [[ "$quote_type" && "$str" == *$quote_type* ]]; then
+        return 1
+    fi
+
+    : "${str%%[\'\"]*}"
+    str_search_offset=$((${#_} + 1))
+}
+
+__bgen_test_contains_heredoc() {
+    local str=$1
+    if [[ "$str" != *[^\<]\<\<[\-\"\_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
+        return 1
+    fi
+
+    : "${str##*[^<]<<}"
+    : "${_#\-}"
+    : "${_#\"}"
+    : "${_%%\"*}"
+    local token=$_
+    if ! [[ "$token" =~ [_[:alpha:]][_[:alnum:]]* ]]; then
+        return 1
+    fi
+    heredoc_token=$token
+}
+
+__bgen_test_contains_heredoc_end() {
+    local str=$1
+    local token=$2
+
+    [[ "$token" && "$str" =~ ^[$'\t']*"$token"$ ]]
 }
 
 # parses coverage map
@@ -488,11 +562,73 @@ __bgen_test_parse_coverage_map() {
     local covered_hunks=()
     local is_prev_line_covered=1
 
+    local in_string=
+    local str_search_offset=0
+
+    local in_heredoc=
+
     while IFS= read -r line; do
         line_nr=$((line_nr + 1))
 
         : "${line%${line##*[![:space:]]}}"  # strip any trailing whitespace if any
         local line=${_#${_%%[![:space:]]*}} # strip leading whitepsace if any
+
+        if __bgen_test_contains_str_end "$line" "$in_string"; then
+            in_string=
+        fi
+
+        if __bgen_test_contains_heredoc_end "$line" "$in_heredoc"; then
+            in_heredoc=
+        fi
+
+        if [[ "$in_string" || "$in_heredoc" ]]; then
+            if ((coverage_map[line_nr])); then
+                __bgen_test_extend_coverage_hunk
+                is_prev_line_covered=1
+                pending_lines=0
+            else
+                pending_lines=$((pending_lines + 1))
+            fi
+            continue
+        fi
+
+        local heredoc_token=
+        if __bgen_test_contains_heredoc "$line"; then
+            if ((coverage_map[line_nr])); then
+                __bgen_test_extend_coverage_hunk
+                is_prev_line_covered=1
+                pending_lines=0
+            else
+                pending_lines=$((pending_lines + 1))
+            fi
+            in_heredoc=$heredoc_token
+            continue
+        fi
+
+        local quote_type=
+        if __bgen_test_contains_str_start "$line"; then
+            if ((coverage_map[line_nr])); then
+                __bgen_test_extend_coverage_hunk
+                is_prev_line_covered=1
+                pending_lines=0
+            else
+                pending_lines=$((pending_lines + 1))
+            fi
+            in_string=$quote_type
+            continue
+        fi
+
+        # lines ending with $(
+        if [[ "$line" =~ ([^\\]|^)\$\($ ]]; then
+            if ((coverage_map[line_nr])); then
+                __bgen_test_extend_coverage_hunk
+                is_prev_line_covered=1
+                pending_lines=0
+            else
+                pending_lines=$((pending_lines + 1))
+            fi
+            continue
+        fi
 
         if [[ "$line" =~ ^\#[[:space:]]BGEN__END[[:space:]] ]]; then
             pending_lines=0
@@ -513,19 +649,18 @@ __bgen_test_parse_coverage_map() {
         if [[ "$line" =~ ^\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
             : "${line#*BGEN__BEGIN[[:space:]]}"
             local file=${_#${_%%[![:space:]]*}}
-            file_covered_lines=$((file_covered_lines + 1))
 
             local start_line_nr=$line_nr
             __bgen_test_parse_coverage_map "$file"
             line_offset=$((line_offset + line_nr - start_line_nr))
 
             __bgen_test_extend_coverage_hunk
-
             pending_lines=0
             continue
         fi
 
-        if [[ "$line" =~ ([\\]|\$\()$ ]] && ! [[ "$line" =~ \\([\\]|\$\()$ ]]; then
+        # lines ending with backslash
+        if [[ "$line" =~ ([^\\]|^)[\\]$ ]]; then
             pending_lines=$((pending_lines + 1))
             continue
         fi
@@ -533,8 +668,6 @@ __bgen_test_parse_coverage_map() {
         if [[ "$current_file" ]]; then
             if __bgen_is_line_covered "$line_nr" "$line"; then
                 __bgen_test_extend_coverage_hunk
-
-                file_covered_lines=$((file_covered_lines + pending_lines + 1))
                 is_prev_line_covered=1
             else
                 __bgen_test_close_coverage_hunk
@@ -679,6 +812,9 @@ __bgen_test_run_single() {
     # so we relax bash options until we get a status code
     set +o errexit +o errtrace +o nounset +o pipefail
     (
+        # used to track sub-subshells
+        export __bgen_test_main_subshell=$BASH_SUBSHELL
+
         # Used to track coverage
         __bgen_test_covered_lines=()
 

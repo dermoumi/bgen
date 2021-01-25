@@ -42,10 +42,25 @@ test_debug_subshells() {
         return
     )
 
+    read -rd "" var <<-"MYDOC" || :
+weeeeee
+
+echo '
+hello world
+cave johnson here
+'"
+assdfa
+"
+MYDOC
+
+    echo "$var"
+
     echo '
         hello world
         cave johnson here
-    '
+    a' "b
+        assdfa
+    "
 
     local output
     output=$(
