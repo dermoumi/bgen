@@ -19,7 +19,7 @@ test_trim_str_removes_leading_and_trailing_spaces() {
     assert_eq "$output" "hello    world"
 }
 
-_test_debug_subshells() {
+test_debug_subshells() {
     # trap -p DEBUG RETURN EXIT ERR >&2
 
     local array_decl=(
@@ -31,9 +31,49 @@ _test_debug_subshells() {
     # standalone subshell
     (
         test test
+        if true; then
+            true
+        fi
         echo "array" "${array_decl[2]}" >&2
+        if true; then
+            true
+        fi
         # trap -p DEBUG RETURN EXIT ERR >&2
         return
+    )
+
+    echo '
+        hello world
+        cave johnson here
+    '
+
+    local output
+    output=$(
+        for i in {0..2}; do
+            true "$i"
+        done
+        # test comment
+        : 42 bail "this is a test message" 42 2>&1
+    )
+
+    local output
+    output=$(
+        for i in {0..2}; do
+            true "$i"
+        done
+        : 42 \
+            bail "this is a test message" 42 \
+            2>&1
+    )
+
+    local output
+    output=$(
+        for i in {0..2}; do
+            true "$i"
+        done
+        assert_exits_with_code 42 bail "this is a test message" 42 2>&1
+        return
+        echo henlo
     )
 
     local output

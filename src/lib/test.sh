@@ -7,6 +7,7 @@ __bgen_test_entrypoint() {
     local test_reports=()
 
     local coverage_map=()
+    local trails_map=()
 
     # linemap shows at what lines each file starts and ends
     if [[ ! "${__BGEN_TEST_LINEMAP:-}" ]]; then
@@ -69,11 +70,11 @@ __bgen_test_entrypoint() {
     fi
 
     # report on coverage if requested
-    : "${BGEN_NO_COVERAGE:=0}"
+    : "${BGEN_COVERAGE:=0}"
     : "${BGEN_HTML_REPORT_FILE:=}"
     : "${BGEN_COVERAGE_M_THRESHOLD:=60}"
     : "${BGEN_COVERAGE_H_THRESHOLD:=85}"
-    if ! ((BGEN_NO_COVERAGE)); then
+    if ((BGEN_COVERAGE)); then
         printf "\n%bCoverage:%b\n" "$__BGEN_TEST_COL_TITLE" "$__BGEN_TEST_COL_RESET"
         __bgen_test_make_coverage_report
     fi
@@ -198,7 +199,13 @@ __bgen_test_exit_handler() {
 
     # save coverage lines into a file, only way to communicate them to the parent process
     local env_file="$__bgen_env_dir/${BASH_SUBSHELL}_${RANDOM}_${RANDOM}.env"
-    declare -p __bgen_test_covered_lines >"$env_file"
+    declare -p __bgen_test_covered_lines >>"$env_file"
+
+    if [[ "${__bgen_test_subshell_line_count+x}" ]]; then
+        local __bgen_test_subshell_trails=()
+        __bgen_test_subshell_trails[$__bgen_test_subshell_line_end]=$((__bgen_test_subshell_line_count))
+        declare -p __bgen_test_subshell_trails >>"$env_file"
+    fi
 
     # if the error handler was already triggered, don't do anything else here
     if ((${__bgen_test_error_handled:-})) || ((subshell_mode)); then
@@ -249,31 +256,56 @@ __bgen_test_debug_handler() {
         line_nr=$((line_nr + 1))
     fi
 
-    if [[ "${__BGEN_TEST_PREV_SUBSHELL:-}" != "$BASH_SUBSHELL" ]]; then
-        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO" 1' EXIT
-        export __BGEN_TEST_PREV_SUBSHELL=$BASH_SUBSHELL
+    if [[ ! "${__bgen_previous_rc+x}" ]]; then
+        export __bgen_previous_rc=0
+        export __bgen_test_prev_cmd=""
+        export __bgen_test_prev_line_nr=1
+    elif ((__bgen_previous_rc == 0)); then
+        export __bgen_previous_rc="$__bgen_test_current_rc"
+        export __bgen_test_prev_cmd="$__bgen_test_current_cmd"
+        export __bgen_test_prev_line_nr="$__bgen_test_current_line_nr"
     fi
+
+    if [[ "${__bgen_test_prev_subshell:-}" != "$BASH_SUBSHELL" ]]; then
+        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO" 1' EXIT
+        export __bgen_test_prev_subshell=$BASH_SUBSHELL
+        # __bgen_test_covered_lines=()
+
+        # special case for multiline output subshells "$(\n ... )"
+        if [[ "${__bgen_test_prev_cmd}" == *$'\n'* ]]; then
+            # calculate number of lines by removing all \n chars
+            # and getting character difference from the original string
+            : "${__bgen_test_prev_cmd//$'\n'/}"
+            __bgen_test_subshell_line_count=$((${#__bgen_test_prev_cmd} - ${#_} + 1))
+
+            # echo "@" "$__bgen_test_subshell_line_count" "$__bgen_test_prev_line_nr" "$__bgen_test_prev_cmd" >&2
+
+            __bgen_test_subshell_line_start=$((__bgen_test_prev_line_nr - __bgen_test_subshell_line_count + 1))
+            __bgen_test_subshell_line_end=$((__bgen_test_prev_line_nr))
+            # else
+            # echo "-" "$__bgen_test_prev_line_nr" "$__bgen_test_prev_cmd" >&2
+        fi
+    fi
+
+    export __bgen_test_current_rc="$rc"
+    export __bgen_test_current_cmd="$cmd"
+
+    if [[ "${__bgen_test_subshell_line_start+x}" ]] && ((\
+    __bgen_test_subshell_line_start <= line_nr && line_nr >= __bgen_test_subshell_line_end)); then
+        # echo "?" "$line_nr" "$((line_nr - __bgen_test_subshell_line_count + 1))" \
+        #     "$__bgen_test_subshell_line_start" "$cmd" >&2
+        line_nr=$((line_nr - __bgen_test_subshell_line_count + 1))
+        __bgen_test_covered_lines[$line_nr]=2 # run this in the second pass
+    else
+        line_nr="$line_nr"
+        __bgen_test_covered_lines[$line_nr]=1
+    fi
+    export __bgen_test_current_line_nr="$line_nr"
 
     # printf '%s %4s %4s %s\n' "$BASH_SUBSHELL" "$line_nr" "${BASH_LINENO[0]}" "$cmd" >&2
     # if [[ "$cmd" =~ $'\n'[[:space:]]*\)[[:space:]]* ]]; then
     #     echo "@@@@@ got a culprit here" >&2
     # fi
-
-    if [[ ! "${__bgen_previous_rc+x}" ]]; then
-        __bgen_previous_rc=0
-        __bgen_test_prev_cmd=""
-        __bgen_test_prev_line_nr=0
-    elif ((__bgen_previous_rc == 0)); then
-        __bgen_previous_rc="$__bgen_test_current_rc"
-        __bgen_test_prev_cmd="$__bgen_test_current_cmd"
-        __bgen_test_prev_line_nr="$__bgen_test_current_line_nr"
-    fi
-
-    __bgen_test_current_rc="$rc"
-    __bgen_test_current_cmd="$cmd"
-    __bgen_test_current_line_nr="$line_nr"
-
-    __bgen_test_covered_lines[$line_nr]=$((BASH_SUBSHELL + 1))
 
     # restore the original value of $_
     : "$old_"
@@ -297,11 +329,10 @@ __bgen_test_join_by() {
 __bgen_is_line_covered() {
     local line_nr="$1"
     local line="$2"
-    local subshell="$3"
 
-    # printf '%s %s %s %s\n' "$line_nr" $((coverage_map[line_nr])) "$subshell" "$line" >&2
-    if ((coverage_map[line_nr] == subshell + 1)); then
-        # if ((coverage_map[line_nr] > 0)); then
+    # printf '%s %s %s %s\n' "$line_nr" $((coverage_map[line_nr])) "$pass_nr" "$line" >&2
+    # if ((coverage_map[line_nr] == pass_nr)); then
+    if ((coverage_map[line_nr])); then
         # line is in the coverage map
         return 0
     fi
@@ -320,8 +351,8 @@ __bgen_is_line_covered() {
         return
     fi
 
-    if [[ "$line" =~ ^[[:space:]]*[\}][[:space:]]*$ ]]; then
-        # line is a single ending curly braces
+    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|fi)[[:space:]]*$ ]]; then
+        # line is a single curly brace or parenthesis
         # covered only if the previous line also covered
         ((${is_prev_line_covered_stack[0]-}))
         return
@@ -383,6 +414,65 @@ __bgen_test_add_file_report() {
     coverage_report+=("$report_line")
 }
 
+__bgen_test_reverse_lines() {
+    tac 2>/dev/null || tail -r 2>/dev/null || gtac
+}
+
+__bgen_test_count_lines() {
+    if wc -l <<<"$1"; then
+        return
+    fi
+
+    # calculate number of lines by removing all \n chars
+    # and getting character difference from the original string
+    : "${1//$'\n'/}"
+    echo $((${#1} - ${#_} + 1))
+}
+
+# takes trailing lines (ending with backslash) into account
+# in the length of trails map
+__bgen_test_normalize_trails_map() {
+    local current_trail=0
+    local trail_start=0
+
+    local line_nr
+    line_nr=$(__bgen_test_count_lines "$BASH_EXECUTION_STRING")
+    while IFS= read -r line; do
+        if ((trails_map[line_nr])); then
+            current_trail=$((line_nr))
+            trail_start=$((line_nr - trails_map[line_nr]))
+        elif ((trail_start != 0 && line_nr < trail_start)); then
+            current_trail=0
+            trail_start=0
+            # echo -----
+            line_nr=$((line_nr - 1))
+            continue
+        fi
+
+        if ((line_nr <= current_trail && line_nr > trail_start)) \
+            && [[ "$line" =~ [\\]$ ]] && ! [[ "$line" =~ \\[\\]$ ]]; then
+            # shift all lines in this trail by 1
+            trail_start=$((trail_start - 1))
+            for ((i = trail_start + 1; i <= line_nr; i++)); do
+                if [[ "${coverage_map[$((i + 1))]+x}" ]]; then
+                    coverage_map[$i]=$((coverage_map[i + 1]))
+                else
+                    unset "coverage_map[$i]"
+                fi
+                # echo "$i ${coverage_map[$i]-}" >&2
+            done
+            # echo "---" >&2
+            unset "coverage_map[$line_nr]"
+        fi
+
+        #         if ((line_nr <= current_trail && line_nr > trail_start)); then
+        #             echo "${coverage_map[$line_nr]-.} $line_nr $line"
+        #         fi
+
+        line_nr=$((line_nr - 1))
+    done < <(__bgen_test_reverse_lines <<<"$BASH_EXECUTION_STRING")
+}
+
 # print final coverage report
 __bgen_test_make_coverage_report() {
     shopt -u extglob
@@ -409,13 +499,20 @@ __bgen_test_make_coverage_report() {
     local subshell_stack=(1)
     local is_prev_line_covered_stack=(1)
 
+    __bgen_test_normalize_trails_map
+
     local line_nr=0
     while IFS= read -r line; do
-        : "${line%${line##*[![:space:]]}}"    # strip any trailing whitespace if any
-        local line="${_#${_%%[![:space:]]*}}" # strip leading whitepsace if any
         line_nr=$((line_nr + 1))
 
-        if [[ "$line" =~ [\\\{\(]$ ]] && ! [[ "$line" =~ \\[\\\\{\(]$ ]]; then
+        : "${line%${line##*[![:space:]]}}"    # strip any trailing whitespace if any
+        local line="${_#${_%%[![:space:]]*}}" # strip leading whitepsace if any
+
+        # if ((trails_map[line_nr])); then
+        #     echo "GOT ONE $line_nr $((line_nr - line_nrs_stack[0] - offsets_stack[0])) $line" >&2
+        # fi
+
+        if [[ "$line" =~ ([\\]|\$\()$ ]] && ! [[ "$line" =~ \\([\\]|\$\()$ ]]; then
             pending_lines=$((pending_lines + 1))
             # printf '\\ %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
             continue
@@ -501,7 +598,7 @@ __bgen_test_make_coverage_report() {
         fi
 
         if ((${#files_stack[@]} > 1)); then
-            if __bgen_is_line_covered "$line_nr" "$line" "${subshell_stack[0]}"; then
+            if __bgen_is_line_covered "$line_nr" "$line"; then
                 if [[ "${hunk_start_stack[0]}" ]]; then
                     hunk_end_stack[0]=$((hunk_end_stack[0] + pending_lines + 1))
                 else
@@ -536,7 +633,6 @@ __bgen_test_make_coverage_report() {
             # else
             # printf -- '. %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
         fi
-
         pending_lines=0
 
     done <<<"$BASH_EXECUTION_STRING"
@@ -650,12 +746,9 @@ __bgen_test_run_single() {
     # shellcheck disable=SC2064
     trap "rm '$stderr_file'" EXIT
 
-    # env_dir=/tmp/testdir
-    # mkdir -p /tmp/testdir
-    # rm -rf /tmp/testdir/*
     env_dir="$(mktemp -d)"
     # shellcheck disable=SC2064
-    # trap "rm -rf '$env_dir'" EXIT
+    trap "rm -rf '$env_dir'" EXIT
     export __bgen_env_dir="$env_dir"
 
     # we don't want this subshell to cause the entire test to fail
@@ -690,29 +783,45 @@ __bgen_test_run_single() {
         fi
 
         # TODO: Make coverage work for all subshells, for now skip other subshells
-        if [[ "${env_file##*/}" != 1_* ]]; then
-            continue
-        fi
+        # if [[ "${env_file##*/}" != 1_* ]]; then
+        #     continue
+        # fi
 
-        local coverage_array
-        coverage_array="$(<"$env_file")"
+        local env_arrays
+        env_arrays="$(<"$env_file")"
+        # echo "# $env_file $env_arrays" >&2
         if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
             # workaround bash <4.4 quoting the content of the variables in declare's output
+            local intermediary_coverage_map=()
+            local affect_intermediary_coverage_map="'intermediary_coverage_map+="
+            local intermediary_trails_map=()
+            local affect_intermediary_trails_map="'intermediary_trails_map+="
+            local newline_sub="'"$'\n'"'"
+            local newline=$'\n'
 
             # also these versions for somereason concat array elements instead of replacing them
             # so we unset existing values before setting new ones
-            local middle_map=()
-            local affect_middle_map="'middle_map+="
-            local substituted="${coverage_array/declare -a __bgen_test_covered_lines=\'/}"
-            eval "$(eval "echo $affect_middle_map$substituted")"
-            for index in "${!middle_map[@]}"; do
+            : "${env_arrays//declare -a __bgen_test_covered_lines=\'/$affect_intermediary_coverage_map}"
+            : "${_//declare -a __bgen_test_subshell_trails=\'/$affect_intermediary_trails_map}"
+            : "${_//$newline_sub/$newline}"
+            eval "$(eval "echo $_")"
+            for index in "${!intermediary_coverage_map[@]}"; do
                 unset "coverage_map[$index]"
+            done
+            for index in "${!intermediary_trails_map[@]}"; do
+                unset "trails_map[$index]"
             done
 
             local affect_coverage_map="'coverage_map+="
-            eval "$(eval "echo $affect_coverage_map$substituted")"
+            local affect_trails_map="'trails_map+="
+            : "${env_arrays//declare -a __bgen_test_covered_lines=\'/$affect_coverage_map}"
+            : "${_//declare -a __bgen_test_subshell_trails=\'/$affect_trails_map}"
+            : "${_//$newline_sub/$newline}"
+            eval "$(eval "echo $_")"
         else
-            eval "${coverage_array/declare -a __bgen_test_covered_lines=/coverage_map+=}"
+            : "${env_arrays//declare -a __bgen_test_covered_lines=/coverage_map+=}"
+            : "${_//declare -a __bgen_test_subshell_trails=/trails_map+=}"
+            eval "$_"
         fi
     done
 
