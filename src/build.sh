@@ -61,6 +61,8 @@ build_tests_to_stdout() {
     local tests_dir=
     local shebang_string=
     local import_paths=
+    local entrypoint_file=
+    local entrypoint_func=
     read_project_meta
 
     # make sure tests directory exists
@@ -133,6 +135,14 @@ build_tests_to_stdout() {
 
     # build the tests file
     echo_header
+
+    # pre-including the project for tests to have better coverage reports
+    # if there's no entrypoint function, we assume the entrypoint file
+    # runs actual code and that can cause problems during tests
+    if [[ "$entrypoint_func" ]]; then
+        bgen_import "$entrypoint_file" || { check && true; }
+    fi
+
     for test_file in "${test_files[@]}"; do
         [[ -f "$test_file" ]] || continue
 
@@ -214,8 +224,15 @@ read_project_meta() {
         output_file="bin/$project_name"
     fi
 
+    # set default entrypoint function
+    if [[ ! "${entrypoint_func:-}" ]]; then
+        entrypoint_func="$project_name"
+    fi
+
     # add the extra import paths
-    import_paths=("${import_paths_extra[@]}" "${import_paths[@]}")
+    if ((${#import_paths_extra[@]})); then
+        import_paths=("${import_paths_extra[@]}" "${import_paths[@]}")
+    fi
 }
 
 echo_header() {
@@ -340,11 +357,7 @@ find_file() {
 
     # check if the file exists
     if [[ -r "$file" ]]; then
-        if [[ "$file" != /* ]]; then
-            echo "$PWD/$file"
-        else
-            echo "$file"
-        fi
+        realpath "$file"
         return
     fi
 
@@ -357,7 +370,7 @@ find_file() {
             fi
 
             if [[ -r "$dir/$file" ]]; then
-                echo "$dir/$file"
+                realpath "$dir/$file"
                 return
             fi
         done
@@ -379,7 +392,9 @@ bgen_import() {
     file=$(find_source_file "$1")
 
     # Don't re-import file if it was already imported
-    if ! is_in_array "$file" "${imported_files[@]-}"; then
+    if is_in_array "$file" "${imported_files[@]-}"; then
+        echo "# BGEN__ALREADY_IMPORTED $file"
+    else
         # Mark file as imported
         imported_files+=("$file")
 

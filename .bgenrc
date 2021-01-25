@@ -3,6 +3,3 @@
 
 # name of the project
 project_name="bgen"
-
-# main entrypoin function
-entrypoint_func="main"

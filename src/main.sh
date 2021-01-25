@@ -5,7 +5,7 @@ bgen:import run
 bgen:import test
 
 # entrypoint
-main() {
+bgen() {
     local cmd="${1:-}"
 
     if [[ "$cmd" == "build" ]]; then
@@ -27,13 +27,13 @@ main() {
 
     if [[ "$cmd" == "test" ]]; then
         shift
-        test_project "$@"
+        run_project_tests "$@"
         return
     fi
 
     if [[ "$cmd" == "test-debug" ]]; then
         shift
-        test_debug_project "$@"
+        run_project_tests_debug "$@"
         return
     fi
 

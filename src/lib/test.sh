@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+bgen:import src/lib/asserts.sh
+
 __bgen_test_entrypoint() {
     local failed_tests_funcs=()
     local test_reports=()
@@ -44,7 +46,13 @@ __bgen_test_entrypoint() {
             fi
         done < <(declare -F)
     fi
-    echo
+
+    if ((total_test_count == 0)); then
+        echo "    No tests to run :("
+    else
+        # return to line after the dots
+        echo
+    fi
 
     if (("${#test_reports[@]}")); then
         for test_report in "${test_reports[@]}"; do
@@ -70,21 +78,23 @@ __bgen_test_entrypoint() {
         __bgen_test_make_coverage_report
     fi
 
-    local n_tests
-    if ((total_test_count == 1)); then
-        n_tests="1 test"
-    else
-        n_tests="$(printf '%s tests' "$total_test_count")"
-    fi
+    if ((total_test_count > 0)); then
+        local n_tests
+        if ((total_test_count == 1)); then
+            n_tests="1 test"
+        else
+            n_tests="$(printf '%s tests' "$total_test_count")"
+        fi
 
-    # exit with error if any test failed
-    if (("${#failed_tests_funcs[@]}")); then
-        printf '\n%b%s/%s passed successfully%b\n' \
-            "$__BGEN_TEST_COL_DANGER" "$passed_test_count" "$n_tests" "$__BGEN_TEST_COL_RESET"
-        exit 1
-    else
-        printf '\n%b%s passed successfully %s%b\n' \
-            "$__BGEN_TEST_COL_SUCCESS" "$n_tests" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
+        # exit with error if any test failed
+        if (("${#failed_tests_funcs[@]}")); then
+            printf '\n%b%s/%s passed successfully%b\n' \
+                "$__BGEN_TEST_COL_DANGER" "$passed_test_count" "$n_tests" "$__BGEN_TEST_COL_RESET"
+            exit 1
+        else
+            printf '\n%b%s passed successfully %s%b\n' \
+                "$__BGEN_TEST_COL_SUCCESS" "$n_tests" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
+        fi
     fi
 }
 
@@ -184,12 +194,14 @@ export -f __bgen_test_error_handler
 # called when a test's subprocess exits
 __bgen_test_exit_handler() {
     local rc="$__bgen_test_current_rc"
+    local subshell_mode="${2:-}"
 
     # save coverage lines into a file, only way to communicate them to the parent process
-    declare -p __bgen_test_covered_lines >"$__bgen_env_file"
+    local env_file="$__bgen_env_dir/${BASH_SUBSHELL}_${RANDOM}_${RANDOM}.env"
+    declare -p __bgen_test_covered_lines >"$env_file"
 
     # if the error handler was already triggered, don't do anything else here
-    if ((${__bgen_test_error_handled:-})); then
+    if ((${__bgen_test_error_handled:-})) || ((subshell_mode)); then
         exit "$rc"
     fi
 
@@ -230,13 +242,28 @@ __bgen_test_debug_handler() {
     local rc="$1"
     local line_nr="$2"
     local cmd="$3"
+    local old_="$4"
 
     # bash versions <5.1 don't seem to count the shebang in their line count
     if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
         line_nr=$((line_nr + 1))
     fi
 
-    if ((__bgen_previous_rc == 0)); then
+    if [[ "${__BGEN_TEST_PREV_SUBSHELL:-}" != "$BASH_SUBSHELL" ]]; then
+        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO" 1' EXIT
+        export __BGEN_TEST_PREV_SUBSHELL=$BASH_SUBSHELL
+    fi
+
+    # printf '%s %4s %4s %s\n' "$BASH_SUBSHELL" "$line_nr" "${BASH_LINENO[0]}" "$cmd" >&2
+    # if [[ "$cmd" =~ $'\n'[[:space:]]*\)[[:space:]]* ]]; then
+    #     echo "@@@@@ got a culprit here" >&2
+    # fi
+
+    if [[ ! "${__bgen_previous_rc+x}" ]]; then
+        __bgen_previous_rc=0
+        __bgen_test_prev_cmd=""
+        __bgen_test_prev_line_nr=0
+    elif ((__bgen_previous_rc == 0)); then
         __bgen_previous_rc="$__bgen_test_current_rc"
         __bgen_test_prev_cmd="$__bgen_test_current_cmd"
         __bgen_test_prev_line_nr="$__bgen_test_current_line_nr"
@@ -246,7 +273,10 @@ __bgen_test_debug_handler() {
     __bgen_test_current_cmd="$cmd"
     __bgen_test_current_line_nr="$line_nr"
 
-    __bgen_test_covered_lines[$line_nr]=1
+    __bgen_test_covered_lines[$line_nr]=$((BASH_SUBSHELL + 1))
+
+    # restore the original value of $_
+    : "$old_"
 }
 export -f __bgen_test_debug_handler
 
@@ -267,8 +297,11 @@ __bgen_test_join_by() {
 __bgen_is_line_covered() {
     local line_nr="$1"
     local line="$2"
+    local subshell="$3"
 
-    if [[ "${coverage_map[$line_nr]-}" ]]; then
+    # printf '%s %s %s %s\n' "$line_nr" $((coverage_map[line_nr])) "$subshell" "$line" >&2
+    if ((coverage_map[line_nr] == subshell + 1)); then
+        # if ((coverage_map[line_nr] > 0)); then
         # line is in the coverage map
         return 0
     fi
@@ -287,8 +320,8 @@ __bgen_is_line_covered() {
         return
     fi
 
-    if [[ "$line" =~ ^[[:space:]]*[\(\)\{\}][[:space:]]*$ ]]; then
-        # line is a single parenthesis
+    if [[ "$line" =~ ^[[:space:]]*[\}][[:space:]]*$ ]]; then
+        # line is a single ending curly braces
         # covered only if the previous line also covered
         ((${is_prev_line_covered_stack[0]-}))
         return
@@ -367,17 +400,26 @@ __bgen_test_make_coverage_report() {
     local total_covered=0
     local total_lines=0
 
+    local pending_lines=0 # lines that end with a backslash
     local covered_hunks=()
     local covered_hunk_count_stack=(0)
     local hunk_start_stack=("")
     local hunk_end_stack=("")
 
+    local subshell_stack=(1)
     local is_prev_line_covered_stack=(1)
 
     local line_nr=0
     while IFS= read -r line; do
-        local line="${line#${line%%[![:space:]]*}}" # strip leading whitepsace if any
+        : "${line%${line##*[![:space:]]}}"    # strip any trailing whitespace if any
+        local line="${_#${_%%[![:space:]]*}}" # strip leading whitepsace if any
         line_nr=$((line_nr + 1))
+
+        if [[ "$line" =~ [\\\{\(]$ ]] && ! [[ "$line" =~ \\[\\\\{\(]$ ]]; then
+            pending_lines=$((pending_lines + 1))
+            # printf '\\ %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
+            continue
+        fi
 
         if [[ "$line" =~ ^\#[[:space:]]BGEN__BEGIN[[:space:]] ]]; then
             : "${line#*BGEN__BEGIN[[:space:]]}"
@@ -394,10 +436,15 @@ __bgen_test_make_coverage_report() {
             hunk_start_stack=("" "${hunk_start_stack[@]}")
             hunk_end_stack=("" "${hunk_end_stack[@]}")
 
+            subshell_stack=("${subshell_stack[0]}" "${subshell_stack[@]}")
             is_prev_line_covered_stack=(1 "${is_prev_line_covered_stack[@]}")
+            pending_lines=0
 
+            # printf '@ %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
             continue
-        elif [[ "$line" =~ ^\#[[:space:]]BGEN__END[[:space:]] ]]; then
+        fi
+
+        if [[ "$line" =~ ^\#[[:space:]]BGEN__END[[:space:]] ]]; then
             if [[ "${hunk_start_stack[0]}" ]]; then
                 if [[ "${hunk_start_stack[0]}" == "${hunk_end_stack[0]}" ]]; then
                     covered_hunks+=("${hunk_start_stack[0]}")
@@ -444,24 +491,30 @@ __bgen_test_make_coverage_report() {
                 hunk_end_stack[0]="$line_nr_offset"
             fi
 
+            # printf '@ %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
+
+            subshell_stack=("${subshell_stack[@]:1}")
             is_prev_line_covered_stack=("${is_prev_line_covered_stack[@]:1}")
+            pending_lines=0
 
             continue
         fi
 
         if ((${#files_stack[@]} > 1)); then
-            if __bgen_is_line_covered "$line_nr" "$line"; then
+            if __bgen_is_line_covered "$line_nr" "$line" "${subshell_stack[0]}"; then
                 if [[ "${hunk_start_stack[0]}" ]]; then
-                    hunk_end_stack[0]=$((hunk_end_stack[0] + 1))
+                    hunk_end_stack[0]=$((hunk_end_stack[0] + pending_lines + 1))
                 else
                     local line_nr_offset=$((line_nr - line_nrs_stack[0] - offsets_stack[0]))
-                    hunk_start_stack[0]="$line_nr_offset"
+                    hunk_start_stack[0]=$((line_nr_offset - pending_lines))
                     hunk_end_stack[0]="$line_nr_offset"
                 fi
 
-                covered_lines_stack[0]=$((covered_lines_stack[0] + 1))
+                covered_lines_stack[0]=$((covered_lines_stack[0] + pending_lines + 1))
 
                 is_prev_line_covered_stack[0]=1
+
+                # printf -- '@ %4s %s %s %s/%s/%s\n' "$line_nr" "$pending_lines" "$line" $((line_nr - line_nrs_stack[0] - offsets_stack[0])) $((line_nrs_stack[0])) $((offsets_stack[0])) >&2
             else
                 if [[ "${hunk_start_stack[0]}" ]]; then
                     if [[ "${hunk_start_stack[0]}" == "${hunk_end_stack[0]}" ]]; then
@@ -476,11 +529,22 @@ __bgen_test_make_coverage_report() {
                 fi
 
                 is_prev_line_covered_stack[0]=0
+                # printf -- '- %4s %s %s %s/%s/%s\n' "$line_nr" "$pending_lines" "$line" $((line_nr - line_nrs_stack[0] - offsets_stack[0])) $((line_nrs_stack[0])) $((offsets_stack[0])) >&2
             fi
 
-            total_lines_stack[0]=$((total_lines_stack[0] + 1))
+            total_lines_stack[0]=$((total_lines_stack[0] + pending_lines + 1))
+            # else
+            # printf -- '. %4s %s %s\n' "$line_nr" "$pending_lines" "$line" >&2
         fi
+
+        pending_lines=0
+
     done <<<"$BASH_EXECUTION_STRING"
+
+    if ((total_lines == 0)); then
+        echo "    Nothing to cover :/"
+        return
+    fi
 
     local coverage_percent
     coverage_percent=$((100 * total_covered / total_lines))
@@ -530,7 +594,7 @@ __bgen_test_make_coverage_report() {
 __bgen_test_format_columns() {
     local separator="${1:-  }"
 
-    if column -o "$separator" -s $'\t' -t -L; then
+    if column -o "$separator" -s $'\t' -t -L 2>/dev/null; then
         return
     fi
 
@@ -574,47 +638,9 @@ __bgen_test_format_columns() {
     done
 }
 
-assert_status() {
-    local status_code="$?"
-
-    local expected_code="${1:-}"
-    [[ "${2:-}" ]] && status_code="$2"
-
-    [[ "$status_code" == "$expected_code" ]] && return 0
-
-    echo "assert_status: expected $expected_code, got $status_code" >&2
-
-    # save line at which this happened, used later for reporting
-    __bgen_assert_line="${BASH_LINENO[0]-}"
-
-    return 1
-}
-export -f assert_status
-
-assert_eq() {
-    local left="$1"
-    local right="$2"
-
-    [[ "$left" == "$right" ]] && return 0
-
-    (
-        echo "assert_eq expected:"
-        echo "$left"
-        echo
-        echo "assert_eq got:"
-        echo "$right"
-    ) >&2
-
-    # save line at which this happened, used later for reporting
-    __bgen_assert_line="${BASH_LINENO[0]-}"
-
-    return 1
-}
-export -f assert_eq
-
 __bgen_test_run_single() {
     local test_func="$1"
-    local stdout_file stderr_file
+    local stdout_file stderr_file env_dir
 
     stdout_file="$(mktemp)"
     # shellcheck disable=SC2064
@@ -624,10 +650,13 @@ __bgen_test_run_single() {
     # shellcheck disable=SC2064
     trap "rm '$stderr_file'" EXIT
 
-    env_file="$(mktemp)"
+    # env_dir=/tmp/testdir
+    # mkdir -p /tmp/testdir
+    # rm -rf /tmp/testdir/*
+    env_dir="$(mktemp -d)"
     # shellcheck disable=SC2064
-    trap "rm '$env_file'" EXIT
-    export __bgen_env_file="$env_file"
+    # trap "rm -rf '$env_dir'" EXIT
+    export __bgen_env_dir="$env_dir"
 
     # we don't want this subshell to cause the entire test to fail
     # so we relax bash options until we get a status code
@@ -636,13 +665,13 @@ __bgen_test_run_single() {
         # Used to track coverage
         __bgen_test_covered_lines=()
 
-        # set up some hooks to print original error lines and files
-        trap '__bgen_test_debug_handler "$?" "$LINENO" "$BASH_COMMAND"' DEBUG
-        trap 'trap - DEBUG; __bgen_test_error_handler "$LINENO"' ERR
-        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO"' EXIT
-
         # enable some bash options to allow error checking
         set -o errexit -o errtrace -o nounset -o pipefail -o functrace
+
+        # set up some hooks to print original error lines and files
+        trap '__bgen_test_debug_handler "$?" "$LINENO" "$BASH_COMMAND" "$_"' DEBUG
+        trap 'trap - DEBUG; __bgen_test_error_handler "$LINENO"' ERR
+        trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO"' EXIT
 
         # call our test function
         "$test_func"
@@ -655,16 +684,37 @@ __bgen_test_run_single() {
     set -o errexit -o errtrace -o nounset -o pipefail
 
     # Merge covered lines into the global list
-    local coverage_array
-    coverage_array="$(cat "$env_file")"
-    if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
-        # going throug a variable becuase bash 3.2 doesn't allow escaping single quote in substitutions
-        local substitution="'coverage_map+="
-        # workaround bash <4.4 quoting the content of the variables in declare's output
-        eval "$(eval "echo ${coverage_array/declare -a __bgen_test_covered_lines=\'/$substitution}")"
-    else
-        eval "${coverage_array/declare -a __bgen_test_covered_lines=/coverage_map+=}"
-    fi
+    for env_file in "$env_dir"/*; do
+        if [[ "$env_file" == "$env_dir/*" ]]; then
+            break
+        fi
+
+        # TODO: Make coverage work for all subshells, for now skip other subshells
+        if [[ "${env_file##*/}" != 1_* ]]; then
+            continue
+        fi
+
+        local coverage_array
+        coverage_array="$(<"$env_file")"
+        if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
+            # workaround bash <4.4 quoting the content of the variables in declare's output
+
+            # also these versions for somereason concat array elements instead of replacing them
+            # so we unset existing values before setting new ones
+            local middle_map=()
+            local affect_middle_map="'middle_map+="
+            local substituted="${coverage_array/declare -a __bgen_test_covered_lines=\'/}"
+            eval "$(eval "echo $affect_middle_map$substituted")"
+            for index in "${!middle_map[@]}"; do
+                unset "coverage_map[$index]"
+            done
+
+            local affect_coverage_map="'coverage_map+="
+            eval "$(eval "echo $affect_coverage_map$substituted")"
+        else
+            eval "${coverage_array/declare -a __bgen_test_covered_lines=/coverage_map+=}"
+        fi
+    done
 
     # print a dot or F depending on test status
     if ((err)); then
@@ -718,8 +768,7 @@ else
     __BGEN_TEST_COL_RESET="\e[0m"
 fi
 
-__BGEN_COVERAGE_HTML_HEADER=$(
-    cat <<-"EOF"
+read -rd "" __BGEN_COVERAGE_HTML_HEADER <<-"EOF" || :
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -783,10 +832,8 @@ __BGEN_COVERAGE_HTML_HEADER=$(
     <hr/>
 </div>
 EOF
-)
 
-__BGEN_COVERAGE_HTML_FILE=$(
-    cat <<-"EOF"
+read -rd "" __BGEN_COVERAGE_HTML_FILE <<-"EOF" || :
 <details class="coverage-file coverage-rating-__COVERAGE_FILE_RATING__" id="__COVERAGE_FILE_ID__" open>
     <summary class="coverage-file-title">
         <span class="coverage-percent">__COVERAGE_FILE_PERCENT__%</span>
@@ -802,10 +849,8 @@ __BGEN_COVERAGE_HTML_FILE=$(
     ><code class="language-bash">__COVERAGE_FILE_CODE__</code></pre>
 </details>
 EOF
-)
 
-__BGEN_COVERAGE_HTML_FOOTER=$(
-    cat <<-"EOF"
+read -rd "" __BGEN_COVERAGE_HTML_FOOTER <<-"EOF" || :
 <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.23.0/prism.min.js"
     integrity="sha512-YBk7HhgDZvBxmtOfUdvX0z8IH2d10Hp3aEygaMNhtF8fSOvBZ16D/1bXZTJV6ndk/L/DlXxYStP8jrF77v2MIg=="
     crossorigin="anonymous"></script>
@@ -819,30 +864,42 @@ __BGEN_COVERAGE_HTML_FOOTER=$(
     integrity="sha512-MGMi0fbhnsk/a/9vCluWv3P4IOfHijjupSoVYEdke+QQyGBOAaXNXnwW6/IZSH7JLdknDf6FL6b57o+vnMg3Iw=="
     crossorigin="anonymous"></script>
 <script>
-var collapseBtn = document.querySelector('.collapse-all');
-if (collapseBtn) {
-    collapseBtn.addEventListener('click', function(e) {
-        e.preventDefault();
+(function() {
+    function collapseAll() {
         var elems = document.querySelectorAll('details[open]');
         for (var i = 0; i < elems.length; ++i) {
             elems[i].open = false;
         }
-    })
-}
-var expandBtn = document.querySelector('.expand-all');
-if (expandBtn) {
-    expandBtn.addEventListener('click', function(e) {
-        e.preventDefault();
+    }
+    function expandAll() {
         var elems = document.querySelectorAll('details');
         for (var i = 0; i < elems.length; ++i) {
             elems[i].open = true;
         }
-    })
-}
+    }
+
+    var collapseBtn = document.querySelector('.collapse-all');
+    if (collapseBtn) {
+        collapseBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            collapseAll();
+        })
+    }
+
+    var expandBtn = document.querySelector('.expand-all');
+    if (expandBtn) {
+        expandBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            expandAll();
+        })
+    }
+
+    // collapsing using js because line highlighter doesn't work on collapsed details blocks
+    setTimeout(collapseAll);
+})();
 </script>
 </body>
 </html>
 EOF
-)
 
 __bgen_test_entrypoint "$@"
