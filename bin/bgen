@@ -77,6 +77,443 @@ trim_str() {
     echo "${_%${_##*[![:space:]]}}"
 }
 # BGEN__END /home/sdrm/projects/bgen/src/utils.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/lib/meta.sh
+# BGEN__SHEBANG_REMOVED
+
+# BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/vars.sh
+# BGEN__SHEBANG_REMOVED
+
+# Utility function to check if any of the passed variables is not declared
+# @param    variable_name...    names of variables to check
+butl.is_declared() {
+    declare -p "$@" >/dev/null 2>/dev/null
+}
+
+# Utility function to check if the passed variable is an array
+butl.is_array() {
+    [[ "$(declare -p "$1" 2>/dev/null)" =~ ^"declare -a " ]]
+}
+
+# Utility function to check is a variable is false
+butl.is_false() {
+    [[ "${1,,}" =~ ^(0|f|false|off)?$ ]]
+}
+
+# Utility function to check if a variable is true
+butl.is_true() {
+    ! butl_is_false "$@"
+}
+
+# Declares a global variable, compatible with bash 3.2
+butl.global_var() {
+    # shellcheck disable=SC2059
+    printf -v "$1" "$2"
+}
+
+# Declares a global array, compatible with bash 3.2
+butl.global_array() {
+    local var_name=$1
+    shift
+    eval "$var_name=($(printf '%q ' "$@"))"
+}
+
+# Copies an array to another by name, compatible with bash 3.2
+# @param source the array to copy from
+# @param target the array to copy to
+butl.copy_array() {
+    eval "$2=( \"\${""$1""[@]}\" )"
+}
+
+# checks if itm is in an array
+butl.is_in_array() {
+    local target=$1
+    shift
+
+    for item in "$@"; do
+        if [[ "$target" == "$item" ]]; then
+            return
+        fi
+    done
+
+    return 1
+}
+
+# Joins argument by a custom delimiter
+butl.join_by() {
+    if (($# <= 1)); then
+        return 0
+    fi
+
+    local delimiter=$1
+    local first=$2
+    shift 2
+
+    printf %s "$first" "${@/#/$delimiter}"
+}
+# BGEN__END /home/sdrm/projects/butl/lib/butl/vars.sh
+
+# shellcheck disable=SC2034
+read_project_meta() {
+    butl.is_declared import_paths || local import_paths
+
+    # make sure some vars are local if not declared on a parent scope
+    butl.is_declared project_root || local project_root
+    butl.is_declared project_name || local project_name
+    butl.is_declared header_file || local header_file
+    butl.is_declared entrypoint_file || local entrypoint_file
+    butl.is_declared entrypoint_func || local entrypoint_func
+    butl.is_declared shebang_string || local shebang_string
+    butl.is_declared output_file || local output_file
+    butl.is_declared tests_dir || local tests_dir
+
+    # set some defaults
+    entrypoint_file="src/main.sh"
+    shebang_string="#!/usr/bin/env bash"
+    tests_dir="tests"
+
+    local import_paths_extra=()
+    import_paths=()
+    import_paths=("deps/*/lib")
+
+    # source config file
+    project_root="$PWD"
+    while true; do
+        # shellcheck disable=SC1091
+        if [[ -f ".bgenrc" ]]; then
+            project_root="$PWD"
+            source ".bgenrc"
+            break
+        elif [[ -f "bgenrc.sh" ]]; then
+            project_root="$PWD"
+            source "bgenrc.sh"
+            break
+        fi
+
+        if [[ "$PWD" == "/" ]]; then
+            break
+        fi
+
+        cd ..
+    done
+
+    # set default project name
+    if [[ ! "${project_name:-}" ]]; then
+        # ${file##*/} keeps only what's after the last slash (aka the basename)
+        project_name="${PWD##*/}"
+    fi
+
+    # set default output file
+    if [[ ! "${output_file:-}" ]]; then
+        output_file="bin/$project_name"
+    fi
+
+    # set default entrypoint function
+    if [[ ! "${entrypoint_func:-}" ]]; then
+        entrypoint_func="$project_name"
+    fi
+
+    # add the extra import paths
+    if ((${#import_paths_extra[@]})); then
+        import_paths=("${import_paths_extra[@]}" "${import_paths[@]}")
+    fi
+
+    # add env paths, give them more priority
+    if [[ "${BGEN_IMPORT_PATHS:-}" ]]; then
+        local env_paths=()
+        while read -rd ':' path; do
+            env_paths+=("$path")
+        done <<<"${BGEN_IMPORT_PATHS}:"
+        import_paths=("${env_paths[@]}" "${import_paths[@]}")
+    fi
+}
+# BGEN__END /home/sdrm/projects/bgen/src/lib/meta.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/lib/build.sh
+# BGEN__SHEBANG_REMOVED
+
+# BGEN__ALREADY_IMPORTED /home/sdrm/projects/butl/lib/butl/vars.sh
+
+echo_header() {
+    local header_file=${header_file:-}
+    if [[ -f "$header_file" ]]; then
+        local shebang_string=${shebang_string:-}
+        printf '%s\n\n' "$shebang_string"
+
+        process_file "$header_file"
+    else
+        local default_header
+# BGEN__INCLUDE_STR_BEGIN
+        read -rd '' default_header <<-"BGEN_EOF_17772_26794" || :
+			#!/usr/bin/env bash
+			
+			# Exit on error. Append "|| true" if you expect an error.
+			set -o errexit
+			# Exit on error inside any functions or subshells.
+			set -o errtrace
+			# Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
+			set -o pipefail
+			# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
+			set -o nounset
+			
+			# TODO: use nounset only on bash 4.4+? earlier versions also complain when expanding empty arrays
+			# if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
+			# set -o nounset
+			# fi
+			
+			# check whether script is source or directly executed
+			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+			    __process__="$__BGEN_PIPE_SOURCE__"
+			elif [[ "${BASH_SOURCE+x}" ]]; then
+			    __process__="${BASH_SOURCE[0]}"
+			else
+			    __process__="$0"
+			fi
+			
+			if [[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
+			    __main__= # false
+			    # shellcheck disable=SC2154
+			    if [[ "${__usage__+x}" ]]; then
+			        if [[ "${BASH_SOURCE[1]}" = "${0}" ]]; then
+			            __main__=1 # true
+			        fi
+			
+			        __process__="${BASH_SOURCE[1]}"
+			    fi
+			else
+			    # shellcheck disable=SC2034
+			    __main__=1 # true
+			    [[ "${__usage__+x}" ]] && unset -v __usage__
+			fi
+			
+			# Set magic variables for current file, directory, os, etc.
+			__dir__="$(cd "$(dirname "${__process__}")" && pwd)"
+			__file__="${__dir__}/$(basename "${__process__}")"
+			# shellcheck disable=SC2034,SC2015
+			__base__="$(basename "${__file__}" .sh)"
+			# shellcheck disable=SC2034,SC2015
+			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+			    __invocation__="${__BGEN_PIPE_SOURCE__}"
+			else
+			    __invocation__="$(printf %q "${__file__}")"
+			fi
+			
+			# Define the environment variables (and their defaults) that this script depends on
+			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
+			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
+			BGEN_EOF_17772_26794
+# BGEN__INCLUDE_STR_END
+
+        echo "$default_header"
+    fi
+
+    # Add some spacing
+    printf '\n\n'
+}
+
+process_file() {
+    local file
+    file=$(find_file "$1")
+
+    # get directory name
+    : "${file%/*}"
+    local src_dir=${_:-/}
+
+    pushd "$src_dir" >/dev/null || return
+    process_input <"$file"
+    popd >/dev/null || return
+}
+
+process_input() {
+    local found_first_line=
+    while IFS= read -r line; do
+        # Process source directives that point ot static files
+        process_directive "$line" || { check && continue; }
+
+        # Remove first shebang in the file
+        if ! [[ "$found_first_line" ]]; then
+            process_shebang "$line" || { check && continue; }
+        fi
+
+        if [[ ! "$found_first_line" ]]; then
+            if ! echo "$line" | grep -E "^[[:space:]]*$" >/dev/null; then
+                found_first_line=1
+            fi
+        fi
+
+        # Otherwise echo the line as is
+        echo "$line"
+    done
+}
+
+echo_entrypoint_call() {
+    local entrypoint_func=${entrypoint_func:-}
+
+    if [[ "$entrypoint_func" ]]; then
+        # shellcheck disable=SC2016
+        printf '\n[[ "$__main__" ]] && %s "$@"\n' "$entrypoint_func"
+    fi
+}
+
+check() {
+    local ret=$?
+
+    if [[ "$ret" == 200 ]]; then
+        return 0
+    fi
+
+    if [[ "$ret" ]] && ((ret != 0 && ret != 200)); then
+        exit "$ret"
+    fi
+
+    return 1
+}
+
+process_shebang() {
+    local line
+    line=$(trim_str "$1")
+
+    if [[ "$line" =~ ^\#\! ]]; then
+        found_first_line=1
+        echo "# BGEN__SHEBANG_REMOVED"
+        return 200
+    fi
+}
+
+process_directive() {
+    local line=$1
+
+    if ! [[ "$line" =~ ^[[:space:]]*bgen\: ]]; then
+        return 0
+    fi
+
+    : "${line%%[![:space:]]*}"
+    local indent_size=${#_}
+
+    # escape `` and $()
+    : "${line//\`/\\\`}"
+    : "${_//\$/\\\$}"
+    : "${_//\(/\\\(}"
+    : "${_//\)/\\/)}"
+
+    # parse arguments
+    declare -a "args=( $_ )"
+    if (("${#args[@]}" == 0)); then
+        return 0
+    fi
+
+    local directive=${args[0]}
+    args=("${args[@]:1}")
+
+    case "$directive" in
+    "bgen:import") bgen_import "${args[@]}" ;;
+    "bgen:include") bgen_include "${args[@]}" ;;
+    "bgen:include_str") bgen_include_str "${args[@]}" ;;
+    "bgen:"*) bail "unknown bgen directive: $directive" ;;
+    *) ;;
+    esac
+}
+
+find_file() {
+    local file=$1
+
+    # check if the file exists
+    if [[ -r "$file" ]]; then
+        realpath "$file"
+        return
+    fi
+
+    # check in import directories
+    # shellcheck disable=SC2154
+    for unexpanded_dir in "${import_paths[@]}"; do
+        for dir in $unexpanded_dir; do
+            # make sure external files are always imported relative to project dir
+            if [[ "$dir" != /* ]]; then
+                dir="${project_root:-$PWD}/$dir"
+            fi
+
+            if [[ -r "$dir/$file" ]]; then
+                realpath "$dir/$file"
+                return
+            fi
+        done
+    done
+
+    # nothing found :(
+    echo "file does not exist or is not readable: $file" >&2
+    return 1
+}
+
+find_source_file() {
+    local file=$1
+
+    find_file "${file}.sh" 2>/dev/null || find_file "$file"
+}
+
+bgen_import() {
+    local file
+    file=$(find_source_file "$1")
+
+    # Don't re-import file if it was already imported
+    if butl.is_in_array "$file" "${imported_files[@]-}"; then
+        echo "# BGEN__ALREADY_IMPORTED $file"
+    else
+        # Mark file as imported
+        imported_files+=("$file")
+
+        # Add a comment indicating where the processing starts
+        echo "# BGEN__BEGIN $file"
+
+        # Do normal file processing
+        process_file "$file"
+
+        # Add a comment indicating where the processing starts
+        echo "# BGEN__END $file"
+    fi
+
+    # Return 200 to tell check() that we've processed something
+    return 200
+}
+
+bgen_include() {
+    local file
+    file=$(find_source_file "$1")
+
+    # Add a comment indicating where the processing starts
+    echo "# BGEN__BEGIN $file"
+
+    # Do normal file processing
+    process_file "$file"
+
+    # Add a comment indicating where the processing starts
+    echo "# BGEN__END $file"
+
+    return 200
+}
+
+bgen_include_str() {
+    local variable=$1
+    local file
+    file=$(find_file "$2")
+
+    local TAB_SIZE=4
+    local indent_size=${indent_size:-0}
+    local tabs=$((indent_size / TAB_SIZE))
+    local indent
+    indent=$(printf "%${indent_size}s")
+    indent_plus=$(printf '\t%.0s' $(seq $((tabs + 1))))
+
+    local heredoc_id="${RANDOM}_${RANDOM}"
+    echo "# BGEN__INCLUDE_STR_BEGIN"
+    echo "${indent}read -rd '' ${variable} <<-\"BGEN_EOF_${heredoc_id}\" || :"
+    while IFS= read -r line; do
+        echo "$indent_plus$line"
+    done <"$file"
+    echo "${indent_plus}BGEN_EOF_${heredoc_id}"
+    echo "# BGEN__INCLUDE_STR_END"
+
+    # Return 200 to tell check() that we've processed something
+    return 200
+}
+# BGEN__END /home/sdrm/projects/bgen/src/lib/build.sh
 
 build_project() {
     # save it in a temp file first
@@ -112,15 +549,20 @@ build_project_to_stdout() {
 
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
+    # shellcheck disable=2034
     local imported_files=()
 
+    # shellcheck disable=2034
     local project_root=
-    local project_name=
+    # shellcheck disable=2034
     local header_file=
-    local entrypoint_file=
+    # shellcheck disable=2034
     local entrypoint_func=
+    # shellcheck disable=2034
     local shebang_string=
+    # shellcheck disable=2034
     local import_paths=
+    local entrypoint_file=
     read_project_meta
 
     # build the project
@@ -128,97 +570,124 @@ build_project_to_stdout() {
     process_file "$entrypoint_file"
     echo_entrypoint_call
 }
+# BGEN__END /home/sdrm/projects/bgen/src/build.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/run.sh
+# BGEN__SHEBANG_REMOVED
+
+# BGEN__ALREADY_IMPORTED /home/sdrm/projects/bgen/src/build.sh
+
+run_project() {
+    export __BGEN_PIPE_SOURCE__="${__base__:-$0} run"
+    bash -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+}
+
+debug_project() {
+    export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
+    bash -x -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+}
+# BGEN__END /home/sdrm/projects/bgen/src/run.sh
+# BGEN__BEGIN /home/sdrm/projects/bgen/src/tests.sh
+# BGEN__SHEBANG_REMOVED
+
+# BGEN__ALREADY_IMPORTED /home/sdrm/projects/bgen/src/lib/meta.sh
+# BGEN__ALREADY_IMPORTED /home/sdrm/projects/bgen/src/lib/build.sh
+
+run_project_tests() {
+    barg.arg test_files \
+        --multi \
+        --value=FILE \
+        --desc="Test script files or directories to run."
+    barg.arg test_funcs \
+        --multi \
+        --short=k \
+        --value FUNC \
+        --desc "Names of test functions to run."
+    barg.arg no_capture \
+        --short=O \
+        --long=no-capture \
+        --env=BGEN_NO_CAPTURE \
+        --desc "Also show the output of succeeding tests."
+    barg.arg coverage \
+        --short=c \
+        --long=coverage \
+        --env=BGEN_COVERAGE \
+        --desc "Make a code coverage report."
+    barg.arg coverage_experimental \
+        --implies=coverage \
+        --short=C \
+        --long=coverage-experimental \
+        --env=BGEN_COVERAGE_EXPERIMENTAL \
+        --desc "Enable experimental code coverage features."
+    barg.arg coverage_debug \
+        --implies=coverage \
+        --short=D \
+        --long=coverage-debug \
+        --env=BGEN_COVERAGE_DEBUG \
+        --desc "Print lines as they're executed to stderr."
+    barg.arg coverage_file \
+        --short=H \
+        --long=html-report \
+        --value=FILE \
+        --default=coverage.html \
+        --env=BGEN_HTML_REPORT_FILE \
+        --desc "Name of the coverage html report."
+    barg.arg print_source \
+        --short=p \
+        --long=print-source \
+        --desc "Print test script's source code instead of executing it"
+
+    local test_files=()
+    local test_funcs=()
+    local no_capture=
+    local coverage=
+    local coverage_experimental=
+    local coverage_debug=
+    local coverage_file=
+    local print_source=
+    barg.parse "$@"
+
+    export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
+
+    local script_file
+    script_file=$(mktemp)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$script_file'" EXIT
+
+    build_tests_to_stdout >"$script_file"
+
+    if ((print_source)); then
+        cat "$script_file"
+    else
+        bash "$script_file"
+    fi
+}
 
 build_tests_to_stdout() {
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
+    # shellcheck disable=2034
     local imported_files=()
 
+    # shellcheck disable=2034
     local project_root=
-    local project_name=
+    # shellcheck disable=2034
     local header_file=
-    local tests_dir=
+    # shellcheck disable=2034
     local shebang_string=
+    # shellcheck disable=2034
     local import_paths=
+    local tests_dir=
     local entrypoint_file=
     local entrypoint_func=
     read_project_meta
 
-    # make sure tests directory exists
-    if ! [[ -d "$tests_dir" ]]; then
-        echo "tests directory '$tests_dir' does not exist" >&2
-        exit 1
-    fi
+    if ! ((${#test_files[@]})); then
+        # make sure tests directory exists
+        if ! [[ -d "$tests_dir" ]]; then
+            echo "tests directory '$tests_dir' does not exist" >&2
+            return 1
+        fi
 
-    local test_files=()
-    local test_funcs=()
-    local failed=0
-    local no_capture="${BGEN_NO_CAPTURE:-0}"
-    local coverage="${BGEN_COVERAGE:-0}"
-    local coverage_experimental="${BGEN_COVERAGE_EXPERIMENTAL:-0}"
-    local coverage_debug="${BGEN_COVERAGE_DEBUG:-0}"
-    local coverage_file="${BGEN_HTML_REPORT_FILE:-}"
-    while (($#)); do
-        case "$1" in
-        -k)
-            test_funcs+=("$2")
-            shift 2
-            ;;
-        -k=*)
-            test_funcs+=("${1/-k=/}")
-            shift
-            ;;
-        -O | --no-capture)
-            no_capture=1
-            shift
-            ;;
-        -c | --coverage)
-            coverage=1
-            shift
-            ;;
-        -C | --coverage-experimental)
-            coverage=1
-            coverage_experimental=1
-            shift
-            ;;
-        -D | --coverage-debug)
-            coverage=1
-            coverage_debug=1
-            shift
-            ;;
-        -h | --html-report)
-            coverage=1
-            coverage_file="$2"
-            shift 2
-            ;;
-        -h=*)
-            coverage=1
-            coverage_file="${1/-h=/}"
-            shift
-            ;;
-        --html-report=*)
-            coverage=1
-            coverage_file="${1/--html-report=/}"
-            shift
-            ;;
-        *)
-            local file="$1"
-            shift
-
-            if [[ -f "$file" ]]; then
-                test_files+=("$file")
-                continue
-            fi
-
-            echo "test file '$file' does not exist" >&2
-            failed=1
-            ;;
-        esac
-    done
-
-    if ((failed)); then
-        exit 1
-    elif ! ((${#test_files[@]})); then
         for file in "$tests_dir"/*; do
             # ${file##*/} keeps only what's after the last slash (aka the basename)
             if [[ "${file##*/}" != "_"* ]]; then
@@ -255,9 +724,9 @@ build_tests_to_stdout() {
     echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
     printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 
-    local testlib
+    local bootstrap
 # BGEN__INCLUDE_STR_BEGIN
-    read -r -d '' testlib <<-"BGEN_EOF_1777226794" || :
+    read -rd '' bootstrap <<-"BGEN_EOF_1435_24388" || :
 		#!/usr/bin/env bash
 		
 		bgen:import src/lib/asserts.sh
@@ -268,6 +737,15 @@ build_tests_to_stdout() {
 		
 		    local coverage_map=()
 		    local trails_map=()
+		
+		    if [[ "${BASH_EXECUTION_STRING:-}" ]]; then
+		        __BGEN_TEST_SOURCE=$BASH_EXECUTION_STRING
+		    elif [[ -f "${BASH_SOURCE[0]-}" ]]; then
+		        __BGEN_TEST_SOURCE=$(<"${BASH_SOURCE[0]}")
+		    else
+		        echo "Cannot file source code" >&2
+		        exit 1
+		    fi
 		
 		    # linemap shows at what lines each file starts and ends
 		    if [[ ! "${__BGEN_TEST_LINEMAP:-}" ]]; then
@@ -280,7 +758,7 @@ build_tests_to_stdout() {
 		            if [[ "$line" =~ ^\#[[:space:]]BGEN__ ]]; then
 		                linemap+=("$line_nr ${line:2}")
 		            fi
-		        done <<<"$BASH_EXECUTION_STRING"
+		        done <<<"$__BGEN_TEST_SOURCE"
 		
 		        local linemap_str
 		        linemap_str="$(__bgen_test_join_by $'\n' "${linemap[@]}")"
@@ -705,7 +1183,7 @@ build_tests_to_stdout() {
 		    local trail_start=0
 		
 		    local line_nr
-		    line_nr=$(__bgen_test_count_lines "$BASH_EXECUTION_STRING")
+		    line_nr=$(__bgen_test_count_lines "$__BGEN_TEST_SOURCE")
 		    while IFS= read -r line; do
 		        if ((trails_map[line_nr])); then
 		            current_trail=$((line_nr))
@@ -732,7 +1210,7 @@ build_tests_to_stdout() {
 		        fi
 		
 		        line_nr=$((line_nr - 1))
-		    done < <(__bgen_test_reverse_lines <<<"$BASH_EXECUTION_STRING")
+		    done < <(__bgen_test_reverse_lines <<<"$__BGEN_TEST_SOURCE")
 		}
 		
 		__bgen_test_extend_coverage_hunk() {
@@ -970,9 +1448,11 @@ build_tests_to_stdout() {
 		
 		            local file_line_count=$((line_nr - file_start - line_offset - 1))
 		
-		            __bgen_test_add_file_report "$current_file" \
-		                "$(__bgen_test_join_by , "${covered_hunks[@]}")" \
-		                "$file_covered_lines" "$file_line_count"
+		            if [[ "$current_file" == "$PWD"* ]]; then
+		                __bgen_test_add_file_report "$current_file" \
+		                    "$(__bgen_test_join_by , "${covered_hunks[@]}")" \
+		                    "$file_covered_lines" "$file_line_count"
+		            fi
 		
 		            total_covered=$((total_covered + file_covered_lines))
 		            total_lines=$((total_lines + file_line_count))
@@ -1022,9 +1502,11 @@ build_tests_to_stdout() {
 		    local total_covered=0
 		    local total_lines=0
 		
+		    echo "    Generating coverage report, please wait..."
+		
 		    local line_nr=0
 		    __bgen_test_normalize_trails_map
-		    __bgen_test_parse_coverage_map <<<"$BASH_EXECUTION_STRING"
+		    __bgen_test_parse_coverage_map <<<"$__BGEN_TEST_SOURCE"
 		
 		    if ((total_lines == 0)); then
 		        echo "    Nothing to cover :/"
@@ -1045,6 +1527,7 @@ build_tests_to_stdout() {
 		    fi
 		
 		    # print file reports
+		    printf '\e[1A\e[2K'
 		    __bgen_test_format_columns < <(
 		        printf '  \t%s\n' "${coverage_report[@]}"
 		        printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
@@ -1181,13 +1664,15 @@ build_tests_to_stdout() {
 		        if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
 		            # workaround bash <4.4 quoting the content of the variables in declare's output
 		            local intermediary_coverage_map=()
-		            local affect_intermediary_coverage_map="'intermediary_coverage_map+="
 		            local intermediary_trails_map=()
+		
+		            # use variables to escape single quotes and newlines in var expansion
+		            local affect_intermediary_coverage_map="'intermediary_coverage_map+="
 		            local affect_intermediary_trails_map="'intermediary_trails_map+="
 		            local newline_sub="'"$'\n'"'"
 		            local newline=$'\n'
 		
-		            # also these versions for somereason concat array elements instead of replacing them
+		            # also these versions concat array elements instead of replacing them
 		            # so we unset existing values before setting new ones
 		            : "${env_arrays//declare -a __bgen_test_covered_lines=\'/$affect_intermediary_coverage_map}"
 		            : "${_//declare -a __bgen_test_subshell_trails=\'/$affect_intermediary_trails_map}"
@@ -1400,512 +1885,85 @@ build_tests_to_stdout() {
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_1777226794
+		BGEN_EOF_1435_24388
 # BGEN__INCLUDE_STR_END
-    process_input <<<"$testlib"
+    process_input <<<"$bootstrap"
 }
-
-# shellcheck disable=SC2034
-read_project_meta() {
-    is_declared import_paths || local import_paths
-
-    # make sure some vars are local if not declared on a parent scope
-    is_declared project_root || local project_root
-    is_declared project_name || local project_name
-    is_declared header_file || local header_file
-    is_declared entrypoint_file || local entrypoint_file
-    is_declared entrypoint_func || local entrypoint_func
-    is_declared shebang_string || local shebang_string
-    is_declared output_file || local output_file
-    is_declared tests_dir || local tests_dir
-
-    # set some defaults
-    entrypoint_file="src/main.sh"
-    shebang_string="#!/usr/bin/env bash"
-    tests_dir="tests"
-
-    local import_paths_extra=()
-    import_paths=()
-    if [[ "${BGEN_IMPORT_PATHS:-}" ]]; then
-        while read -r -d ':' path; do
-            import_paths+=("$path")
-        done <<<"${BGEN_IMPORT_PATHS}:"
-    fi
-    import_paths+=(deps/*/lib)
-
-    # source config file
-    project_root="$PWD"
-    while true; do
-        # shellcheck disable=SC1091
-        if [[ -f ".bgenrc" ]]; then
-            project_root="$PWD"
-            source ".bgenrc"
-            break
-        elif [[ -f "bgenrc.sh" ]]; then
-            project_root="$PWD"
-            source "bgenrc.sh"
-            break
-        fi
-
-        if [[ "$PWD" == "/" ]]; then
-            break
-        fi
-
-        cd ..
-    done
-
-    # set default project name
-    if [[ ! "${project_name:-}" ]]; then
-        # ${file##*/} keeps only what's after the last slash (aka the basename)
-        project_name="${PWD##*/}"
-    fi
-
-    # set default output file
-    if [[ ! "${output_file:-}" ]]; then
-        output_file="bin/$project_name"
-    fi
-
-    # set default entrypoint function
-    if [[ ! "${entrypoint_func:-}" ]]; then
-        entrypoint_func="$project_name"
-    fi
-
-    # add the extra import paths
-    if ((${#import_paths_extra[@]})); then
-        import_paths=("${import_paths_extra[@]}" "${import_paths[@]}")
-    fi
-}
-
-echo_header() {
-    if [[ -f "$header_file" ]]; then
-        printf '%s\n\n' "$shebang_string"
-
-        process_file "$header_file"
-    else
-        local default_header
-# BGEN__INCLUDE_STR_BEGIN
-        read -r -d '' default_header <<-"BGEN_EOF_143524388" || :
-			#!/usr/bin/env bash
-			
-			# Exit on error. Append "|| true" if you expect an error.
-			set -o errexit
-			# Exit on error inside any functions or subshells.
-			set -o errtrace
-			# Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
-			set -o pipefail
-			# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
-			set -o nounset
-			
-			# TODO: use nounset only on bash 4.4+? earlier versions also complain when expanding empty arrays
-			# if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
-			# set -o nounset
-			# fi
-			
-			# check whether script is source or directly executed
-			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
-			    __process__="$__BGEN_PIPE_SOURCE__"
-			elif [[ "${BASH_SOURCE+x}" ]]; then
-			    __process__="${BASH_SOURCE[0]}"
-			else
-			    __process__="$0"
-			fi
-			
-			if [[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
-			    __main__= # false
-			    # shellcheck disable=SC2154
-			    if [[ "${__usage__+x}" ]]; then
-			        if [[ "${BASH_SOURCE[1]}" = "${0}" ]]; then
-			            __main__=1 # true
-			        fi
-			
-			        __process__="${BASH_SOURCE[1]}"
-			    fi
-			else
-			    # shellcheck disable=SC2034
-			    __main__=1 # true
-			    [[ "${__usage__+x}" ]] && unset -v __usage__
-			fi
-			
-			# Set magic variables for current file, directory, os, etc.
-			__dir__="$(cd "$(dirname "${__process__}")" && pwd)"
-			__file__="${__dir__}/$(basename "${__process__}")"
-			# shellcheck disable=SC2034,SC2015
-			__base__="$(basename "${__file__}" .sh)"
-			# shellcheck disable=SC2034,SC2015
-			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
-			    __invocation__="${__BGEN_PIPE_SOURCE__}"
-			else
-			    __invocation__="$(printf %q "${__file__}")"
-			fi
-			
-			# Define the environment variables (and their defaults) that this script depends on
-			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
-			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_143524388
-# BGEN__INCLUDE_STR_END
-
-        echo "$default_header"
-    fi
-
-    # Add some spacing
-    printf '\n\n'
-}
-
-process_file() {
-    local file="$1"
-    file=$(find_file "$file")
-
-    # get directory name
-    : "${file%/*}"
-    local src_dir="${_:-/}"
-
-    pushd "$src_dir" >/dev/null || return
-    process_input <"$file"
-    popd >/dev/null || return
-}
-
-process_input() {
-    local found_first_line=
-    while IFS= read -r line; do
-        # Process source directives that point ot static files
-        process_directive "$line" || { check && continue; }
-
-        # Remove first shebang in the file
-        if ! [[ "$found_first_line" ]]; then
-            process_shebang "$line" || { check && continue; }
-        fi
-
-        if [[ ! "$found_first_line" ]]; then
-            if ! echo "$line" | grep -E "^[[:space:]]*$" >/dev/null; then
-                found_first_line=1
-            fi
-        fi
-
-        # Otherwise echo the line as is
-        echo "$line"
-    done
-}
-
-echo_entrypoint_call() {
-    if [[ "$entrypoint_func" ]]; then
-        # shellcheck disable=SC2016
-        printf '\n[[ "$__main__" ]] && %s "$@"\n' "$entrypoint_func"
-    fi
-}
-
-check() {
-    local ret="$?"
-
-    if [[ "$ret" == 200 ]]; then
-        return 0
-    fi
-
-    if [[ "$ret" ]] && ((ret != 0 && ret != 200)); then
-        exit "$ret"
-    fi
-
-    return 1
-}
-
-process_shebang() {
-    local line="$1"
-    line=$(trim_str "$line")
-
-    if [[ "$line" =~ ^\#\! ]]; then
-        found_first_line=1
-        echo "# BGEN__SHEBANG_REMOVED"
-        return 200
-    fi
-}
-
-process_directive() {
-    local line="$1"
-
-    if ! [[ "$line" =~ ^[[:space:]]*bgen\: ]]; then
-        return 0
-    fi
-
-    : "${line%%[![:space:]]*}"
-    local indent_size=${#_}
-
-    # escape `` and $()
-    : "${line//\`/\\\`}"
-    : "${_//\$/\\\$}"
-    : "${_//\(/\\\(}"
-    : "${_//\)/\\/)}"
-
-    # parse arguments
-    declare -a "args=( $_ )"
-    if (("${#args[@]}" == 0)); then
-        return 0
-    fi
-
-    local directive="${args[0]}"
-    args=("${args[@]:1}")
-
-    case "$directive" in
-    "bgen:import") bgen_import "${args[@]}" ;;
-    "bgen:include") bgen_include "${args[@]}" ;;
-    "bgen:include_str") bgen_include_str "${args[@]}" ;;
-    "bgen:"*) bail "unknown bgen directive: $directive" ;;
-    *) ;;
-    esac
-}
-
-find_file() {
-    local file="$1"
-
-    # check if the file exists
-    if [[ -r "$file" ]]; then
-        realpath "$file"
-        return
-    fi
-
-    # check in import directories
-    for unexpanded_dir in "${import_paths[@]}"; do
-        for dir in $unexpanded_dir; do
-            # make sure external files are always imported relative to project dir
-            if [[ "$dir" != /* ]]; then
-                dir="${project_root:-$PWD}/$dir"
-            fi
-
-            if [[ -r "$dir/$file" ]]; then
-                realpath "$dir/$file"
-                return
-            fi
-        done
-    done
-
-    # nothing found :(
-    echo "file does not exist or is not readable: $file" >&2
-    return 1
-}
-
-find_source_file() {
-    local file="$1"
-
-    find_file "${file}.sh" 2>/dev/null || find_file "$file"
-}
-
-bgen_import() {
-    local file
-    file=$(find_source_file "$1")
-
-    # Don't re-import file if it was already imported
-    if is_in_array "$file" "${imported_files[@]-}"; then
-        echo "# BGEN__ALREADY_IMPORTED $file"
-    else
-        # Mark file as imported
-        imported_files+=("$file")
-
-        # Add a comment indicating where the processing starts
-        echo "# BGEN__BEGIN $file"
-
-        # Do normal file processing
-        process_file "$file"
-
-        # Add a comment indicating where the processing starts
-        echo "# BGEN__END $file"
-    fi
-
-    # Return 200 to tell check() that we've processed something
-    return 200
-}
-
-bgen_include() {
-    local file
-    file=$(find_source_file "$1")
-
-    # Add a comment indicating where the processing starts
-    echo "# BGEN__BEGIN $file"
-
-    # Do normal file processing
-    process_file "$file"
-
-    # Add a comment indicating where the processing starts
-    echo "# BGEN__END $file"
-
-    return 200
-}
-
-bgen_include_str() {
-    local variable="$1"
-    local file="$2"
-    file=$(find_file "$file")
-
-    local TAB_SIZE=4
-    local indent_size="${indent_size:-0}"
-    local tabs=$((indent_size / TAB_SIZE))
-    local indent
-    indent=$(printf "%${indent_size}s")
-    indent_plus=$(printf '\t%.0s' $(seq $((tabs + 1))))
-
-    local heredoc_id="$RANDOM$RANDOM"
-    echo "# BGEN__INCLUDE_STR_BEGIN"
-    echo "${indent}read -r -d '' ${variable} <<-\"BGEN_EOF_${heredoc_id}\" || :"
-    while IFS= read -r line; do
-        echo "$indent_plus$line"
-    done <"$file"
-    echo "${indent_plus}BGEN_EOF_${heredoc_id}"
-    echo "# BGEN__INCLUDE_STR_END"
-
-    # Return 200 to tell check() that we've processed something
-    return 200
-}
-
-is_in_array() {
-    local target="$1"
-    shift
-
-    for item in "$@"; do
-        [[ "$target" == "$item" ]] && return 0
-    done
-
-    return 1
-}
-
-# Utility function to check if any of the passed variables is not declared
-# @param    variable_name...    names of variables to check
-is_declared() {
-    declare -p "$@" >/dev/null 2>/dev/null
-}
-# BGEN__END /home/sdrm/projects/bgen/src/build.sh
-# BGEN__BEGIN /home/sdrm/projects/bgen/src/run.sh
-# BGEN__SHEBANG_REMOVED
-
-# BGEN__ALREADY_IMPORTED /home/sdrm/projects/bgen/src/build.sh
-
-run_project() {
-    export __BGEN_PIPE_SOURCE__="${__base__:-$0} run"
-    bash -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
-}
-
-debug_project() {
-    export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
-    bash -x -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
-}
-# BGEN__END /home/sdrm/projects/bgen/src/run.sh
-# BGEN__BEGIN /home/sdrm/projects/bgen/src/test.sh
-# BGEN__SHEBANG_REMOVED
-
-# BGEN__ALREADY_IMPORTED /home/sdrm/projects/bgen/src/build.sh
-
-run_project_tests_debug() {
-    export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
-    build_tests_to_stdout "$@"
-}
-
-run_project_tests() {
-    export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
-    bash -c "$(build_tests_to_stdout "$@")" "${__base__:-$0} test" "$@"
-}
-# BGEN__END /home/sdrm/projects/bgen/src/test.sh
+# BGEN__END /home/sdrm/projects/bgen/src/tests.sh
 # BGEN__BEGIN /home/sdrm/projects/barg/lib/barg.sh
 # BGEN__SHEBANG_REMOVED
 
-# BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/vars.sh
-# BGEN__SHEBANG_REMOVED
-
-# Utility function to check if any of the passed variables is not declared
-# @param    variable_name...    names of variables to check
-butl.is_declared() {
-    declare -p "$@" >/dev/null 2>/dev/null
-}
-
-# Utility function to check if the passed variable is an array
-butl.is_array() {
-    [[ "$(declare -p "$1" 2>/dev/null)" =~ ^"declare -a " ]]
-}
-
-# Utility function to check is a variable is false
-butl.is_false() {
-    [[ "${1,,}" =~ ^(0|f|false|off)?$ ]]
-}
-
-# Utility function to check if a variable is true
-butl.is_true() {
-    ! butl_is_false "$@"
-}
-
-# Declares a global variable, compatible with bash 3.2
-butl.global_var() {
-    # shellcheck disable=SC2059
-    printf -v "$1" "$2"
-}
-
-# Declares a global array, compatible with bash 3.2
-butl.global_array() {
-    local var_name=$1
-    shift
-    eval "$var_name=($(printf '%q ' "$@"))"
-}
-
-# Copies an array to another by name, compatible with bash 3.2
-butl.copy_array() {
-    eval "$2=( \"\${""$1""[@]}\" )"
-}
-
-# Joins argument by a custom delimiter
-butl.join_by() {
-    if (($# <= 1)); then
-        return 0
-    fi
-
-    local delimiter=$1
-    local first=$2
-    shift 2
-
-    printf %s "$first" "${@/#/$delimiter}"
-}
-# BGEN__END /home/sdrm/projects/butl/lib/butl/vars.sh
+# BGEN__ALREADY_IMPORTED /home/sdrm/projects/butl/lib/butl/vars.sh
 # BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/echo.sh
 # BGEN__SHEBANG_REMOVED
 
+# BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/ansi.sh
+# BGEN__SHEBANG_REMOVED
+
 # Colors o/
-if [[ "$NO_COLOR" ]]; then
-    export BUTL_RESET=""
-    export BUTL_BOLD=""
-    export BUTL_RED=""
-    export BUTL_GREEN=""
-    export BUTL_YELLOW=""
-    export BUTL_BLUE=""
-    export BUTL_MAGENTA=""
-    export BUTL_CYAN=""
-    export BUTL_WHITE=""
+if ((${NO_COLOR:-})); then
+    export BUTL_ANSI_RESET=
+
+    export BUTL_ANSI_BOLD=
+    export BUTL_ANSI_DIM=
+    export BUTL_ANSI_UNDERLINE=
+
+    export BUTL_ANSI_RESET_UNDERLINE=
+
+    export BUTL_ANSI_BLACK=
+    export BUTL_ANSI_RED=
+    export BUTL_ANSI_GREEN=
+    export BUTL_ANSI_YELLOW=
+    export BUTL_ANSI_BLUE=
+    export BUTL_ANSI_MAGENTA=
+    export BUTL_ANSI_CYAN=
+    export BUTL_ANSI_WHITE=
+
+    export BUTL_ANSI_BRBLACK=
 else
-    export BUTL_RESET="\e[0m"
-    export BUTL_BOLD="\e[1m"
-    export BUTL_RED="\e[31m"
-    export BUTL_GREEN="\e[32m"
-    export BUTL_YELLOW="\e[33m"
-    export BUTL_BLUE="\e[34m"
-    export BUTL_MAGENTA="\e[35m"
-    export BUTL_CYAN="\e[36m"
-    export BUTL_WHITE="\e[37m"
+    export BUTL_ANSI_RESET="\e[0m"
+
+    export BUTL_ANSI_BOLD="\e[1m"
+    export BUTL_ANSI_DIM="\e[2m"
+    export BUTL_ANSI_UNDERLINE="\e[4m"
+
+    export BUTL_ANSI_RESET_UNDERLINE="\e[24m"
+
+    export BUTL_ANSI_BLACK="\e[30m"
+    export BUTL_ANSI_RED="\e[31m"
+    export BUTL_ANSI_GREEN="\e[32m"
+    export BUTL_ANSI_YELLOW="\e[33m"
+    export BUTL_ANSI_BLUE="\e[34m"
+    export BUTL_ANSI_MAGENTA="\e[35m"
+    export BUTL_ANSI_CYAN="\e[36m"
+    export BUTL_ANSI_WHITE="\e[37m"
+
+    export BUTL_ANSI_BRBLACK="\e[90m"
 fi
+# BGEN__END /home/sdrm/projects/butl/lib/butl/ansi.sh
 
 # Prints stylized text
 # @param message... text to echo
 butl.echo_title() {
-    printf '%b%b=> %s%b\n' "$BUTL_BOLD" "$BUTL_CYAN" "$*" "$BUTL_RESET"
+    printf '%b%b=> %b%b\n' "$BUTL_ANSI_BOLD" "$BUTL_ANSI_CYAN" "$*" "$BUTL_ANSI_RESET"
 }
 
 # Prints stylized text
 # @param message... text to echo
 butl.echo_success() {
-    printf '%b=> %s%b\n' "$BUTL_GREEN" "$*" "$BUTL_RESET"
+    printf '%b=> %b%b\n' "$BUTL_ANSI_GREEN" "$*" "$BUTL_ANSI_RESET"
 }
 
 # Prints stylized text
 # @param message... text to echo
 butl.echo_warning() {
-    printf '%b%s%b\n' "$BUTL_YELLOW" "$*" "$BUTL_RESET"
+    printf '%b%b%b\n' "$BUTL_ANSI_YELLOW" "$*" "$BUTL_ANSI_RESET"
 }
 
 # Prints stylized text
 # @param message... text to echo
 butl.echo_err() {
-    printf '%b%s%b\n' "$BUTL_RED" "$*" "$BUTL_RESET" >&2
+    printf '%b%b%b\n' "$BUTL_ANSI_RED" "$*" "$BUTL_ANSI_RESET" >&2
 }
 
 # Prints an error and returns with an exit code
@@ -1924,6 +1982,372 @@ butl.die() {
     exit "${2:-1}"
 }
 # BGEN__END /home/sdrm/projects/butl/lib/butl/echo.sh
+
+# BGEN__BEGIN /home/sdrm/projects/barg/lib/parse.sh
+# BGEN__SHEBANG_REMOVED
+
+# Parses arguments looking for a subcommand
+# @param        args...         the arguments to parse
+# @required_var subcommand      will be set to the called subcommand
+# @required_var subcommand_args will be set to an array of the args that came after the subcommand
+# @optional_var global_args     will be set to an array of the args that came before the subcommand
+barg.parse() {
+    # add the help subcommand if there are other subcommands
+    if [[ ! "${__barg_disable_help:-}" ]]; then
+        if butl.is_array __barg_subcommands && (("${#__barg_subcommands[@]}")); then
+            barg.subcommand help barg.print_usage \
+                "Prints this message or the help of the given subcommand(s)"
+        fi
+
+        if ! butl.is_declared barg_help; then
+            local barg_help
+        fi
+
+        if __barg_has_flags; then
+            barg.arg barg_help --short=h --long=help --desc "Prints help information"
+        else
+            barg.arg barg_help --short=h --long=help --desc "Prints help information" --hidden
+        fi
+    fi
+
+    butl.is_array __barg_subcommands || __barg_subcommands=()
+    butl.is_array __barg_options || __barg_options=()
+    butl.is_array __barg_flags || __barg_flags=()
+    # shellcheck disable=SC2034 # TODO: Implement arg parsing
+    butl.is_array __barg_args || __barg_args=()
+
+    local catchall_array=()
+    local process_args_only=0
+
+    # Parse the rest of the arguments
+    while (($#)); do
+        local arg="$1"
+        shift
+
+        local processed_arg=
+        if ! ((process_args_only)); then
+            if [[ "$arg" == "--" ]]; then
+                process_args_only=1
+                continue
+            fi
+
+            # Check if there's a subcommand
+            if [[ " ${__barg_subcommands[*]-} " == *" $arg "* ]]; then
+                local var_subcommand_func="__barg_subcommand_${arg//[-]/_}_func"
+
+                if ! butl.is_declared subcommand; then
+                    local subcommand
+                fi
+
+                if (($#)); then
+                    subcommand=("${!var_subcommand_func}" "$@")
+                else
+                    subcommand=("${!var_subcommand_func}")
+                fi
+
+                # run help command in this context to access other barg variables
+                if [[ "$arg" == "help" ]]; then
+                    "${subcommand[@]}"
+                    exit
+                fi
+
+                barg.reset
+                return
+            fi
+
+            # Check options
+            for option in "${__barg_options[@]-}"; do
+                local shift_count=0
+
+                if [[ "$arg" == --* ]]; then
+                    local var_option_long="__barg_option_${option}_long"
+                    local option_long="${!var_option_long:-}"
+                    if [[ ! "$option_long" ]]; then
+                        continue
+                    fi
+
+                    if [[ "$arg" == --"$option_long" ]]; then
+                        local option_arg="--$option_long"
+                        __barg_parse_option "$@"
+                        shift "$shift_count"
+                    elif [[ "$arg" == --"$option_long"=* ]]; then
+                        local param=${arg#--"$option_long"=}
+                        local option_arg="--$option_long=$param"
+                        __barg_parse_option "$param"
+                    fi
+                elif [[ "$arg" == -* ]]; then
+                    local var_option_short="__barg_option_${option}_short"
+                    local option_short="${!var_option_short:-}"
+                    if [[ ! "$option_short" ]]; then
+                        continue
+                    fi
+
+                    if [[ "$arg" == -*"$option_short" ]]; then
+                        local option_arg="-$option_short"
+                        __barg_parse_option "$@"
+                        shift "$shift_count"
+                    elif [[ "$arg" == -*"$option_short"=* ]]; then
+                        local param=${arg#-*"$option_short"=}
+                        local option_arg="-$option_short=$param"
+                        __barg_parse_option "$param"
+                    fi
+                fi
+            done
+
+            # Check flags
+            for flag in "${__barg_flags[@]-}"; do
+                if [[ "$arg" == --* ]]; then
+                    local var_flag_long="__barg_flag_${flag}_long"
+                    local flag_long="${!var_flag_long:-}"
+                    if [[ ! "$flag_long" ]]; then
+                        continue
+                    fi
+
+                    if [[ "$arg" == "--$flag_long" ]]; then
+                        local flag_arg="--$flag_long"
+                        __barg_parse_flag
+                    fi
+                elif [[ "$arg" == -* ]]; then
+                    local var_flag_short="__barg_flag_${flag}_short"
+                    local flag_short="${!var_flag_short:-}"
+                    if [[ ! "$flag_short" ]]; then
+                        continue
+                    fi
+
+                    if [[ "$arg" == -*"$flag_short"* ]]; then
+                        local flag_arg="-$flag_short"
+                        __barg_parse_flag
+                    fi
+                fi
+            done
+
+            # If we successfully processed an argument, move on to the next directly
+            if ! ((${__barg_disable_help:-0})) && ((${barg_help:-0})); then
+                barg.print_usage
+                exit 0
+            fi
+        fi
+
+        # TODO: Process args here
+
+        if ((processed_arg)); then
+            continue
+        fi
+
+        if ! ((process_args_only)); then
+            # Check for other arguments
+            if [[ "${__barg_catchall_arg:-}" && "$arg" != -?* ]]; then
+                catchall_array+=("$arg")
+            else
+                local msg="Unknown argument: ${BUTL_ANSI_UNDERLINE}${arg}${BUTL_ANSI_RESET_UNDERLINE} "
+                butl.fail "$msg"
+                return
+            fi
+        elif [[ "${__barg_catchall_arg:-}" ]]; then
+            catchall_array+=("$arg")
+        fi
+    done
+
+    # Set the catchall flag if any
+    if [[ "${__barg_catchall_arg:-}" ]]; then
+        butl.copy_array "catchall_array" "$__barg_catchall_arg"
+    fi
+
+    # Fill from env or set default values for unset options
+    for option in "${__barg_options[@]}"; do
+        # Skip if variable is declared, or if an array; not empty.
+        if ! butl.is_declared "$option"; then
+            continue
+        else
+            local var_option_set="__bgen_option_${option}_set"
+            if ((${!var_option_set-})); then
+                continue
+            fi
+        fi
+
+        local option_is_updated=
+
+        # Set default value from enviornment
+        local var_option_env="__barg_option_${option}_env"
+        local option_env=${!var_option_env}
+        if [[ "$option_env" && "${!option_env+x}" ]]; then
+            # shellcheck disable=SC2059
+            printf -v "$option" "${!option_env}"
+
+            option_is_updated=1
+        else
+            if butl.is_array "$option"; then
+                butl.copy_array "$option" "__barg_option_${option}_defaults"
+
+                option_is_updated=1
+            else
+                local option_defaults=()
+                butl.copy_array "__barg_option_${option}_defaults" "option_defaults"
+
+                if ((${#option_defaults[@]})); then
+                    # shellcheck disable=SC2059
+                    printf -v "$option" "${option_defaults[0]}"
+
+                    option_is_updated=1
+                fi
+            fi
+        fi
+
+        # Update implied flags
+        if ((option_is_updated)); then
+            # mark the option as set
+            printf -v "__bgen_option_${option}_set" 1
+            local option_implies=()
+
+            butl.copy_array "__barg_option_${option}_implies" "option_implies"
+            for implied_flag in "${option_implies[@]-}"; do
+                if [[ ! "$implied_flag" ]]; then
+                    continue
+                fi
+
+                if [[ " ${__barg_flags[*]} " != *" $implied_flag "* ]]; then
+                    butl.fail "Option $option implies '$implied_flag', but $implied_flag is not a flag."
+                    return
+                fi
+
+                butl.global_var "$implied_flag" 1
+            done
+        fi
+    done
+
+    # Fill from env or set default values for unset flags
+    for flag in "${__barg_flags[@]-}"; do
+        # Skip if variable is not declared or not empty
+        if ! butl.is_declared "$flag" || [[ "${!flag:-}" ]]; then
+            continue
+        fi
+
+        # Set default value from environment
+        local var_flag_env="__barg_flag_${flag}_env"
+        local flag_env=${!var_flag_env}
+        if [[ ! "$flag_env" ]] || ! ((${!flag_env:-})); then
+            printf -v "$flag" ''
+            continue
+        fi
+
+        printf -v "$flag" 1
+
+        # Update implied flags
+        local flag_implies=()
+        butl.copy_array "__barg_flag_${flag}_implies" "flag_implies"
+        for implied_flag in "${flag_implies[@]-}"; do
+            if [[ ! "$implied_flag" ]]; then
+                continue
+            fi
+
+            if [[ " ${__barg_flags[*]} " != *" $implied_flag "* ]]; then
+                local msg="Flag ${BUTL_ANSI_UNDERLINE}${flag}${BUTL_ANSI_RESET_UNDERLINE} "
+                msg+="implies ${BUTL_ANSI_UNDERLINE}${implied_flag}${BUTL_ANSI_RESET_UNDERLINE}, "
+                msg+="but ${BUTL_ANSI_UNDERLINE}${implied_flag}${BUTL_ANSI_RESET_UNDERLINE} "
+                msg+="is not a flag."
+                butl.fail "$msg"
+                return
+            fi
+
+            butl.global_var "$implied_flag" 1
+        done
+    done
+
+    if (("${#__barg_subcommands[@]}")); then
+        barg.print_usage
+        exit 1
+    fi
+
+    barg.reset
+}
+
+__barg_parse_option() {
+    processed_arg=1
+    if ! butl.is_declared "$option"; then
+        return
+    fi
+
+    local option_values=()
+    butl.copy_array "__barg_option_${option}_values" "option_values"
+
+    local value_count=${#option_values[@]}
+    if ((value_count > $#)); then
+        local msg="Option ${BUTL_ANSI_UNDERLINE}${option_arg}${BUTL_ANSI_RESET_UNDERLINE} "
+        msg+="requires ${BUTL_ANSI_UNDERLINE}${value_count}${BUTL_ANSI_RESET_UNDERLINE} values"
+        butl.fail "$msg"
+        return
+    fi
+
+    local var_option_multi="__barg_option_${option}_multi"
+    local option_multi="${!var_option_multi}"
+
+    if ((option_multi)); then
+        local values=()
+        butl.copy_array "$option" "values"
+        values+=("${@:1:$value_count}")
+        butl.global_array "$option" "${values[@]}"
+    else
+        if ((value_count > 1)); then
+            butl.global_array "$option" "${@:1:$value_count}"
+        else
+            butl.global_var "$option" "$1"
+        fi
+    fi
+
+    # set implied flags to 1
+    local option_implies=()
+    butl.copy_array "__barg_option_${option}_implies" "option_implies"
+    for implied_flag in "${option_implies[@]-}"; do
+        if [[ ! "$implied_flag" ]]; then
+            continue
+        fi
+
+        if [[ " ${__barg_flags[*]} " != *" $implied_flag "* ]]; then
+            local msg="Option ${BUTL_ANSI_UNDERLINE}${option_arg}${BUTL_ANSI_RESET_UNDERLINE} "
+            msg+="implies ${BUTL_ANSI_UNDERLINE}${implied_flag}${BUTL_ANSI_RESET_UNDERLINE}, "
+            msg+="but ${BUTL_ANSI_UNDERLINE}${implied_flag}${BUTL_ANSI_RESET_UNDERLINE} "
+            msg+="is not a flag."
+            butl.fail "$msg"
+            return
+        fi
+
+        butl.global_var "$implied_flag" 1
+    done
+
+    shift_count=$value_count
+
+    # mark the option as set
+    printf -v "__bgen_option_${option}_set" 1
+}
+
+__barg_parse_flag() {
+    processed_arg=1
+    if ! butl.is_declared "$flag"; then
+        return
+    fi
+
+    printf -v "$flag" 1
+
+    # set implied flags to 1
+    local flag_implies=()
+    butl.copy_array "__barg_flag_${flag}_implies" "flag_implies"
+    for implied_flag in "${flag_implies[@]-}"; do
+        if [[ ! "$implied_flag" ]]; then
+            continue
+        fi
+
+        if [[ " ${__barg_flags[*]} " != *" $implied_flag "* ]]; then
+            butl.fail "Flag $flag_arg implies '$implied_flag', but $implied_flag is not a flag."
+            return
+        fi
+
+        butl.global_var "$implied_flag" 1
+    done
+}
+# BGEN__END /home/sdrm/projects/barg/lib/parse.sh
+# BGEN__BEGIN /home/sdrm/projects/barg/lib/usage.sh
+# BGEN__SHEBANG_REMOVED
+
 # BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/columns.sh
 # BGEN__SHEBANG_REMOVED
 
@@ -1975,293 +2399,42 @@ butl.columns() {
     done
 }
 # BGEN__END /home/sdrm/projects/butl/lib/butl/columns.sh
+# BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/strip_ansi.sh
+# BGEN__SHEBANG_REMOVED
 
-# Declare a subcommand
-# @param subcommand         name of the subcommand
-# @param subcommand_func    command to call for this subcommand
-# shellcheck disable=2059
-barg.subcommand() {
-    local subcommand=$1
-    local subcommand_func=$2
-    local subcommand_desc=$3
-
-    if ! butl.is_array __barg_subcommands; then
-        __barg_subcommands=()
+butl.strip_ansi_style() {
+    if shopt -qs extglob; then
+        local keep_extglob=1
     fi
 
-    __barg_subcommands+=("$subcommand")
+    shopt -s extglob
+    echo "${1//\\@(e|x1[bB])\[[0-9]?([0-9])*([;:]?([0-9]?([0-9])))[m]/}"
 
-    printf -v "__barg_subcommand_${subcommand//-/_}_func" "$subcommand_func"
-    printf -v "__barg_subcommand_${subcommand//-/_}_desc" "$subcommand_desc"
-}
-
-# When called, barg doesn't append its help command/flag
-barg.disable_help() {
-    __barg_disable_help=1
-}
-
-# Declare an argument
-# shellcheck disable=2059
-barg.arg() {
-    local second_pass_args=()
-    local arg_values=()
-    local arg_defaults=()
-
-    while (($#)); do
-        case "$1" in
-        --value)
-            arg_values+=("$2")
-            shift 2
-            ;;
-        --value=*)
-            arg_values+=("${1/--value=/}")
-            shift
-            ;;
-        *)
-            second_pass_args+=("$1")
-            shift
-            ;;
-        esac
-    done
-    if ((${#second_pass_args[@]})); then
-        set -- "${second_pass_args[@]}"
-    fi
-
-    while (($#)); do
-        case "$1" in
-        --short)
-            local arg_short=$2
-            shift 2
-            ;;
-        --short=*)
-            local arg_short=${1/--short=/}
-            shift
-            ;;
-        --long)
-            local arg_long=$2
-            shift 2
-            ;;
-        --long=*)
-            local arg_long=${1/--long=/}
-            shift
-            ;;
-        --desc)
-            local arg_desc=$2
-            shift 2
-            ;;
-        --desc=*)
-            local arg_desc=${1/--desc=/}
-            shift
-            ;;
-        --env)
-            local arg_env=$2
-            shift 2
-            ;;
-        --env=*)
-            local arg_env=${1/--env=/}
-            shift
-            ;;
-        --default)
-            arg_defaults+=("$2")
-            shift 2
-            ;;
-        --default=*)
-            arg_defaults+=("${1/--default=/}")
-            shift
-            ;;
-        --defaults)
-            arg_defaults=()
-            for ((i = 0; i <= "${#arg_values[@]}"; i++)); do
-                arg_defaults+=("$1")
-                shift
-            done
-            ;;
-        *)
-            if [[ "${arg+x}" ]]; then
-                butl.fail "expected 1 argument, but was given more: $1"
-                return
-            fi
-
-            local arg="$1"
-            shift
-            ;;
-        esac
-    done
-
-    if ((${#arg_values[@]})); then
-        # handle options
-        butl.is_array __barg_options || __barg_options=()
-
-        butl.global_var "__barg_option_${arg}_desc" "${arg_desc:-}"
-        butl.global_var "__barg_option_${arg}_short" "${arg_short:-}"
-        butl.global_var "__barg_option_${arg}_long" "${arg_long:-}"
-        butl.global_var "__barg_option_${arg}_env" "${arg_env:-}"
-        butl.global_array "__barg_option_${arg}_values" "${arg_values[@]}"
-        butl.global_array "__barg_option_${arg}_defaults" "${arg_defaults[@]-}"
-
-        __barg_options+=("$arg")
-    elif butl.is_declared arg_short || butl.is_declared arg_long; then
-        # handle flags
-        butl.is_array __barg_flags || __barg_flags=()
-
-        butl.global_var "__barg_flag_${arg}_desc" "${arg_desc:-}"
-        butl.global_var "__barg_flag_${arg}_short" "${arg_short:-}"
-        butl.global_var "__barg_flag_${arg}_long" "${arg_long:-}"
-        butl.global_var "__barg_flag_${arg}_env" "${arg_env:-}"
-
-        __barg_flags+=("$arg")
-    else
-        # handle arguments
-        butl.is_array __barg_args || __barg_args=()
-
-        butl.global_var "__barg_arg_${arg}_env" "${arg_env:-}"
-        butl.global_var "__barg_arg_${arg}_values" "${arg_values:-}"
-        butl.global_array "__barg_arg_${arg}_defaults" "${arg_defaults[@]-}"
-
-        __barg_args+=("$arg")
+    if ! ((keep_extglob)); then
+        shopt -u extglob
     fi
 }
 
-# Parses arguments looking for a subcommand
-# @param        args...         the arguments to parse
-# @required_var subcommand      will be set to the called subcommand
-# @required_var subcommand_args will be set to an array of the args that came after the subcommand
-# @optional_var global_args     will be set to an array of the args that came before the subcommand
-barg.parse() {
-    # add the help subcommand if there are other subcommands
-    if [[ ! "${__barg_disable_help:-}" ]]; then
-        if butl.is_array __barg_subcommands && (("${#__barg_subcommands[@]}")); then
-            barg.subcommand help barg.print_usage "Prints this message or the help of the given subcommand(s)"
-        fi
-
-        if butl.is_array __barg_flags && (("${#__barg_flags[@]}")); then
-            barg.arg help --short=h --long=help --desc "Prints help information"
-        fi
+butl.strip_ansi() {
+    if shopt -qs extglob; then
+        local keep_extglob=1
     fi
 
-    butl.is_array __barg_subcommands || __barg_subcommands=()
-    butl.is_array __barg_options || __barg_options=()
-    butl.is_array __barg_flags || __barg_flags=()
-    butl.is_array __barg_args || __barg_args=()
+    shopt -s extglob
+    echo "${1//\\@(e|x1[bB])\[[0-9]?([0-9])*([;:]?([0-9]?([0-9])))[ABCDEFGHJKSTfmin]/}"
 
-    # Parse the rest of the arguments
-    while (($#)); do
-        local arg="$1"
-        shift
-
-        # Check if there's a subcommand
-        if [[ " ${__barg_subcommands[*]-} " == *" $arg "* ]]; then
-            local var_subcommand_func="__barg_subcommand_${arg//-/_}_func"
-
-            if ! butl.is_declared subcommand; then
-                local subcommand
-            fi
-
-            if (($#)); then
-                subcommand=("${!var_subcommand_func}" "$@")
-            else
-                subcommand=("${!var_subcommand_func}")
-            fi
-
-            # run help command in this context to access other barg variables
-            if [[ "$arg" == "help" ]]; then
-                "${subcommand[@]}"
-                exit
-            fi
-
-            barg.reset
-            return
-        fi
-
-        local processed_arg=
-
-        # Check options
-        for option in "${__barg_options[@]-}"; do
-            :
-        done
-
-        # Check flags
-        for flag in "${__barg_flags[@]-}"; do
-            # don't bother if the variable is not declared
-            butl.is_declared "$flag" || continue
-
-            if [[ "$arg" == --* ]]; then
-                local var_flag_long="__barg_flag_${flag}_long"
-                local flag_long="${!var_flag_long}"
-                if [[ "$arg" == "--$flag_long" ]]; then
-                    printf -v "$flag" 1
-                    processed_arg=1
-                fi
-            elif [[ "$arg" == -* ]]; then
-                local var_flag_short="__barg_flag_${flag}_short"
-                local flag_short="${!var_flag_short}"
-                if [[ "$arg" == -*"$flag_short"* ]]; then
-                    printf -v "$flag" 1
-                    processed_arg=1
-                fi
-            fi
-        done
-
-        # If we successfully processed an argument, move on to the next directly
-        if [[ "$processed_arg" ]]; then
-            continue
-        fi
-
-        # Check for other arguments
-        if [[ ! "${__barg_disable_help:-}" ]] && [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
-            barg.print_usage
-            exit 0
-        else
-            butl.fail "unkown argument: $arg"
-            return
-        fi
-    done
-
-    # Fill from env or set default values for unset flags
-    for flag in "${__barg_flags[@]-}"; do
-        # Skip if variable is not declared or not empty
-        if ! butl.is_declared "$flag" || [[ "${!flag:-}" ]]; then
-            continue
-        fi
-
-        local var_flag_env="__barg_flag_${flag}_env"
-        local flag_env="${!var_flag_env}"
-        if [[ ! "$flag_env" ]] || butl.is_false "${!flag_env:-}"; then
-            printf -v "$flag" ''
-            continue
-        fi
-
-        printf -v "$flag" 1
-    done
-
-    if (("${#__barg_subcommands[@]}")); then
-        barg.print_usage
-        exit 1
+    if ! ((keep_extglob)); then
+        shopt -u extglob
     fi
-
-    barg.reset
 }
-
-# Resets internal variables to their clean state
-# shellcheck disable=SC2154
-barg.reset() {
-    unset __barg_disable_help
-
-    unset __barg_subcommands
-    unset "${!__barg_subcommand_@}"
-    # unset $(compgen -v | grep -e "^__barg_subcommand_")
-
-    unset __barg_flags
-    unset "${!__barg_flag_@}"
-    # unset $(compgen -v | grep -e "^__barg_flag_")
-}
+# BGEN__END /home/sdrm/projects/butl/lib/butl/strip_ansi.sh
 
 # Prints help/usage text base on the declared commands, arguments and options
 # shellcheck disable=SC2120
 barg.print_usage() {
-    local subcommand=${1:-}
-    if [[ "$subcommand" ]]; then
-        barg.print_subcommand_usage "$subcommand"
+    local subcommand_name=${1:-}
+    if [[ "$subcommand_name" ]]; then
+        barg.print_subcommand_usage "$subcommand_name"
         return
     fi
 
@@ -2269,24 +2442,52 @@ barg.print_usage() {
     local arg_list=()
     local section_break=
 
+    # shellcheck disable=SC2154
     if ((${#__barg_subcommands[@]})); then
         arg_list+=("SUBCOMMAND")
     fi
 
+    # shellcheck disable=SC2154
     if ((${#__barg_flags[@]})); then
         arg_list+=("[FLAGS...]")
     fi
 
+    # shellcheck disable=SC2154
     if ((${#__barg_options[@]})); then
         arg_list+=("[OPTIONS...]")
     fi
 
-    if ((${#__barg_args[@]})); then
-        arg_list+=("ARGS")
+    # shellcheck disable=SC2154
+    local arg_count=${#__barg_args[@]}
+    if ((arg_count)); then
+        for arg in "${__barg_args[@]}"; do
+            # shellcheck disable=SC2154
+            if [[ "$arg" == "$__barg_catchall_arg" ]]; then
+                continue
+            fi
+
+            local var_arg_values="__barg_arg_${arg}_values"
+            local arg_values=()
+            butl.copy_array "$var_arg_values" "arg_values"
+
+            local value="${arg_values[0]:-ARGS}"
+            arg_list+=("${value}")
+        done
+
+        # add the catch all at the end
+        if [[ "$__barg_catchall_arg" ]]; then
+            local var_arg_values="__barg_arg_${__barg_catchall_arg}_values"
+            local arg_values=()
+            butl.copy_array "$var_arg_values" "arg_values"
+
+            local value="${arg_values[0]:-ARGS}"
+            arg_list+=("[${value}...]")
+        fi
     fi
 
     # Print usage
-    printf '%bUSAGE:%b\n' "$BUTL_YELLOW" "$BUTL_RESET"
+    # shellcheck disable=SC2154
+    printf '%bUSAGE:%b\n' "$__barg_style_title" "$__barg_style_reset"
     printf '    %s%s\n' "$process_base" "$(printf ' %s' "${arg_list[@]-}")"
     section_break=1
 
@@ -2296,22 +2497,33 @@ barg.print_usage() {
             [[ "$subcommand" ]] || continue
             local subcommand_desc_var="__barg_subcommand_${subcommand//-/_}_desc"
             local subcommand_desc="${!subcommand_desc_var:-}"
-            printf '    %b%s%b\t %s\n' "$BUTL_GREEN" "$subcommand" "$BUTL_RESET" "$subcommand_desc"
+            # shellcheck disable=SC2154
+            printf '    %b%s%b\t %s\n' "$__barg_style_arg" "$subcommand" \
+                "$__barg_style_reset" "$subcommand_desc"
         done
     )
 
     if [[ "$subcommands_text" ]]; then
         [[ "$section_break" ]] && echo
-        printf '%bSUBCOMMANDS:%b\n' "$BUTL_YELLOW" "$BUTL_RESET"
+        printf '%bSUBCOMMANDS:%b\n' "$__barg_style_title" "$__barg_style_reset"
         butl.columns ' ' <<<"$subcommands_text"
 
         section_break=1
     fi
 
+    # shellcheck disable=SC2154
+    local flag_desc_cr_threshold=$__barg_usage_flag_desc_length_threshold
+    # shellcheck disable=SC2154
+    local option_desc_cr_threshold=$__barg_usage_option_desc_length_threshold
+    # shellcheck disable=SC2154
+    local arg_desc_cr_threschold=$__barg_usage_arg_desc_length_threshold
+
     # Print flags if any
     flags_text=$(
         for flag in "${__barg_flags[@]-}"; do
-            [[ "$flag" ]] || continue
+            if [[ ! "$flag" ]]; then
+                continue
+            fi
 
             local flag_desc_var="__barg_flag_${flag}_desc"
             local flag_desc="${!flag_desc_var:-}"
@@ -2330,9 +2542,9 @@ barg.print_usage() {
             fi
 
             if [[ "${flag_short:-}" ]]; then
-                printf '    %b-%s%b' "$BUTL_GREEN" "$flag_short" "$BUTL_RESET"
+                printf '    %b-%s%b' "$__barg_style_arg" "$flag_short" "$__barg_style_reset"
             else
-                printf '    %b  %b' "$BUTL_GREEN" "$BUTL_RESET"
+                printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
             fi
 
             if [[ "${flag_short:-}" && "${flag_long:-}" ]]; then
@@ -2342,18 +2554,27 @@ barg.print_usage() {
             fi
 
             if [[ "${flag_long:-}" ]]; then
-                printf '%b--%s%b' "$BUTL_GREEN" "$flag_long" "$BUTL_RESET"
+                printf '%b--%s%b' "$__barg_style_arg" "$flag_long" "$__barg_style_reset"
             else
-                printf '%b%b' "$BUTL_GREEN" "$BUTL_RESET"
+                printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
             fi
 
-            printf '\t %s' "${flag_desc//$'\n'/$'\n\t\t '}"
+            local desc="$flag_desc "
 
             if [[ "${flag_env}" ]]; then
-                printf ' [env: %s=%b%s%b]' "$flag_env" "$BUTL_CYAN" "${!flag_env:-}" "$BUTL_RESET"
+                if __barg_is_lastline_too_long "$flag_desc_cr_threshold" "$desc"; then
+                    desc+=$'\n'
+                fi
+
+                # shellcheck disable=SC2154
+                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' "$__barg_style_info" \
+                    "$__barg_style_info_var" "$flag_env" "$__barg_style_info_equals" \
+                    "$__barg_style_info_value" "${!flag_env:-}" \
+                    "$__barg_style_info" "$__barg_style_reset")
             fi
 
-            printf '\n'
+            : "${desc//$'\n'/$'\n\t\t '}"
+            printf '\t %s\n' "${_::-1}"
         done
     )
 
@@ -2362,8 +2583,8 @@ barg.print_usage() {
             echo
         fi
 
-        printf '%bFLAGS:%b\n' "$BUTL_YELLOW" "$BUTL_RESET"
-        butl.format_columns <<<"$flags_text"
+        printf '%bFLAGS:%b\n' "$__barg_style_title" "$__barg_style_reset"
+        butl.columns ' ' <<<"$flags_text"
 
         section_break=1
     fi
@@ -2371,7 +2592,9 @@ barg.print_usage() {
     # Print options if any
     options_text=$(
         for option in "${__barg_options[@]-}"; do
-            [[ "$option" ]] || continue
+            if [[ ! "$option" ]]; then
+                continue
+            fi
 
             local option_desc_var="__barg_option_${option}_desc"
             local option_desc=${!option_desc_var:-}
@@ -2398,9 +2621,9 @@ barg.print_usage() {
             fi
 
             if [[ "${option_short:-}" ]]; then
-                printf '    %b-%s%b' "$BUTL_GREEN" "$option_short" "$BUTL_RESET"
+                printf '    %b-%s%b' "$__barg_style_arg" "$option_short" "$__barg_style_reset"
             else
-                printf '    %b  %b' "$BUTL_GREEN" "$BUTL_RESET"
+                printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
             fi
 
             if [[ "${option_short:-}" && "${option_long:-}" ]]; then
@@ -2410,27 +2633,46 @@ barg.print_usage() {
             fi
 
             if [[ "${option_long:-}" ]]; then
-                printf '%b--%s%b' "$BUTL_GREEN" "$option_long" "$BUTL_RESET"
+                printf '%b--%s%b' "$__barg_style_arg" "$option_long" "$__barg_style_reset"
             else
-                printf '%b%b' "$BUTL_GREEN" "$BUTL_RESET"
+                printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
             fi
 
             if [[ "${option_values[0]-}" ]]; then
-                printf '%b%s%b' "$BUTL_GREEN" "$(printf ' <%s>' "${option_values[@]}")" "$BUTL_RESET"
+                local values_str
+                values_str=$(printf ' <%s>' "${option_values[@]}")
+                if [[ ! "${option_long:-}" ]]; then
+                    values_str=${values_str:1}
+                fi
+                printf '%b%s%b' "$__barg_style_arg" "$values_str" "$__barg_style_reset"
             fi
 
-            printf '\t %s' "${option_desc//$'\n'/$'\n\t\t '}"
+            local desc="$option_desc "
 
             if [[ "${option_defaults[0]-}" ]]; then
-                printf ' [default: %b%b%b]' \
-                    "$BUTL_CYAN" "$(butl.join_by "$BUTL_RESET, $BUTL_CYAN" "${option_defaults[@]}")" "$BUTL_RESET"
+                if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
+                    desc+=$'\n'
+                fi
+
+                local join_separator="$__barg_style_reset, $__barg_style_info_value"
+                desc+=$(printf '%b[default: %b%b%b]%b ' "$__barg_style_info" "$__barg_style_info_value" \
+                    "$(butl.join_by "$join_separator" "${option_defaults[@]}")" \
+                    "$__barg_style_info" "$__barg_style_reset")
             fi
 
             if [[ "${option_env}" ]]; then
-                printf ' [env: %s=%b%s%b]' "$option_env" "$BUTL_CYAN" "${!option_env:-}" "$BUTL_RESET"
+                if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
+                    desc+=$'\n'
+                fi
+
+                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' "$__barg_style_info" \
+                    "$__barg_style_info_var" "$option_env" "$__barg_style_info_equals" \
+                    "$__barg_style_info_value" "${!option_env:-}" \
+                    "$__barg_style_info" "$__barg_style_reset")
             fi
 
-            printf '\n'
+            : "${desc//$'\n'/$'\n\t\t '}"
+            printf '\t %s\n' "${_::-1}"
         done
     )
 
@@ -2439,8 +2681,75 @@ barg.print_usage() {
             echo
         fi
 
-        printf '%bOPTIONS:%b\n' "$BUTL_YELLOW" "$BUTL_RESET"
-        butl.format_columns <<<"$options_text"
+        printf '%bOPTIONS:%b\n' "$__barg_style_title" "$__barg_style_reset"
+        butl.columns ' ' <<<"$options_text"
+
+        section_break=1
+    fi
+
+    # Print args if any
+    args_text=$(
+        for arg in "${__barg_args[@]-}"; do
+            if [[ ! "$arg" ]]; then
+                continue
+            fi
+
+            local arg_desc_var="__barg_arg_${arg}_desc"
+            local arg_desc=${!arg_desc_var:-}
+
+            local arg_env_var="__barg_arg_${arg}_env"
+            local arg_env=${!arg_env_var:-}
+
+            local arg_values_var="__barg_arg_${arg}_values"
+            local arg_values
+            butl.copy_array "$arg_values_var" arg_values
+
+            local arg_defaults_var="__barg_arg_${arg}_defaults"
+            local arg_defaults
+            butl.copy_array "$arg_defaults_var" arg_defaults
+
+            if [[ "${arg_values[0]-}" ]]; then
+                printf '   %b%s%b' "$__barg_style_arg" \
+                    "$(printf ' <%s>' "${arg_values[@]}")" "$__barg_style_reset"
+            fi
+
+            local desc="$arg_desc "
+
+            if [[ "${arg_defaults[0]-}" ]]; then
+                if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
+                    desc+=$'\n'
+                fi
+
+                local join_separator="$__barg_style_reset, $__barg_style_info_value"
+                desc+=$(printf '%b[default: %b%b%b]%b ' \
+                    "$__barg_style_info" "$__barg_style_info_value" \
+                    "$(butl.join_by "$join_separator" "${arg_defaults[@]}")" \
+                    "$__barg_style_info" "$__barg_style_reset")
+            fi
+
+            if [[ "${arg_env}" ]]; then
+                if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
+                    desc+=$'\n'
+                fi
+
+                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' \
+                    "$__barg_style_info" "$__barg_style_info_var" \
+                    "$arg_env" "$__barg_style_info_equals" "$__barg_style_info_value" \
+                    "${!arg_env:-}" "$__barg_style_info" "$__barg_style_reset")
+            fi
+
+            : "${desc//$'\n'/$'\n\t '}"
+            printf '\t %s\n' "${_::-1}"
+        done
+    )
+
+    if [[ "$args_text" ]]; then
+        if [[ "$section_break" ]]; then
+            echo
+        fi
+
+        printf '%bARGUMENTS:%b\n' "$__barg_style_title" "$__barg_style_reset"
+        butl.columns ' ' <<<"$args_text"
 
         section_break=1
     fi
@@ -2458,9 +2767,343 @@ barg.print_subcommand_usage() {
         return
     fi
 
-    butl.echo_err "$subcommand is not a valid subcommand\n"
+    local msg="There's no help subject on: ${BUTL_ANSI_UNDERLINE}${subcommand}${BUTL_ANSI_RESET_UNDERLINE}\n"
+    butl.echo_err "$msg"
     barg.print_usage
     return 1
+}
+
+__barg_is_lastline_too_long() {
+    local size_threshold=$1
+    if ((size_threshold == 0)); then
+        return 1
+    fi
+
+    : "${2##*$'\n'}"
+    : "$(butl.strip_ansi_style "$_")"
+    ((${#_} > size_threshold))
+}
+# BGEN__END /home/sdrm/projects/barg/lib/usage.sh
+
+# shellcheck disable=SC2034
+: "${__barg_style_title:="${BUTL_ANSI_RESET}${BUTL_ANSI_YELLOW}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_arg:="${BUTL_ANSI_RESET}${BUTL_ANSI_GREEN}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_info:="${BUTL_ANSI_RESET}${BUTL_ANSI_DIM}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_info_var:="${__barg_style_info}${BUTL_ANSI_UNDERLINE}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_info_equals:="${__barg_style_info}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_info_value:="${BUTL_ANSI_RESET}${BUTL_ANSI_CYAN}"}"
+# shellcheck disable=SC2034
+: "${__barg_style_reset:="${BUTL_ANSI_RESET}"}"
+
+# shellcheck disable=SC2034
+: "${__barg_usage_arg_desc_length_threshold:=0}"
+# shellcheck disable=SC2034
+: "${__barg_usage_flag_desc_length_threshold:=0}"
+# shellcheck disable=SC2034
+: "${__barg_usage_option_desc_length_threshold:=0}"
+
+# Declare a subcommand
+# @param subcommand         name of the subcommand
+# @param subcommand_func    command to call for this subcommand
+# shellcheck disable=2059
+barg.subcommand() {
+    local subcommand=$1
+    local subcommand_func=$2
+    local subcommand_desc=$3
+
+    if ! butl.is_array __barg_subcommands; then
+        __barg_subcommands=()
+    fi
+
+    __barg_subcommands+=("$subcommand")
+
+    printf -v "__barg_subcommand_${subcommand//-/_}_func" "$subcommand_func"
+    printf -v "__barg_subcommand_${subcommand//-/_}_desc" "$subcommand_desc"
+}
+
+# When called, barg doesn't append its help command/flag
+barg.disable_help() {
+    # shellcheck disable=SC2034
+    __barg_disable_help=1
+}
+
+# Declare an argument
+# shellcheck disable=2059
+barg.arg() {
+    local second_pass_args=()
+    local arg_values=()
+    local arg_defaults=()
+    local arg_implies=()
+    local arg_multi=
+    local arg_catchall=
+
+    local arg_desc=
+    local arg_short=
+    local arg_long=
+    local arg_env=
+    local arg_hidden=
+    butl.is_declared arg && unset arg
+
+    while (($#)); do
+        case "$1" in
+        --value)
+            arg_values+=("$2")
+            shift 2
+            ;;
+        --value=*)
+            arg_values+=("${1#--value=}")
+            shift
+            ;;
+        *)
+            second_pass_args+=("$1")
+            shift
+            ;;
+        esac
+    done
+    if ((${#second_pass_args[@]})); then
+        set -- "${second_pass_args[@]}"
+    fi
+
+    while (($#)); do
+        case "$1" in
+        --short)
+            arg_short=$2
+            shift 2
+            ;;
+        --short=*)
+            arg_short=${1#--short=}
+            shift
+            ;;
+        --long)
+            arg_long=$2
+            shift 2
+            ;;
+        --long=*)
+            arg_long=${1#--long=}
+            shift
+            ;;
+        --desc)
+            arg_desc=$2
+            shift 2
+            ;;
+        --desc=*)
+            arg_desc=${1#--desc=}
+            shift
+            ;;
+        --env)
+            arg_env=$2
+            shift 2
+            ;;
+        --env=*)
+            arg_env=${1#--env=}
+            shift
+            ;;
+        --default)
+            arg_defaults+=("$2")
+            shift 2
+            ;;
+        --default=*)
+            arg_defaults+=("${1#--default=}")
+            shift
+            ;;
+        --defaults)
+            local value_count=${#arg_values[@]}
+            arg_defaults=("${@:1:$value_count}")
+            shift "$value_count"
+            ;;
+        --multi)
+            arg_multi=1
+            shift
+            ;;
+        --implies)
+            arg_implies+=("$2")
+            shift 2
+            ;;
+        --implies=*)
+            arg_implies+=("${1#--implies=}")
+            shift
+            ;;
+        --hidden)
+            arg_hidden=1
+            shift
+            ;;
+        *)
+            if [[ "${arg+x}" ]]; then
+                butl.fail "expected 1 argument, but was given more: $1"
+                return
+            fi
+
+            local arg="$1"
+            shift
+            ;;
+        esac
+    done
+
+    if ((${#arg_values[@]})) && [[ "$arg_short" || "$arg_long" ]]; then
+        # handle options
+        butl.is_array __barg_options || __barg_options=()
+
+        butl.global_var "__barg_option_${arg}_desc" "${arg_desc:-}"
+        butl.global_var "__barg_option_${arg}_short" "${arg_short:-}"
+        butl.global_var "__barg_option_${arg}_long" "${arg_long:-}"
+        butl.global_var "__barg_option_${arg}_env" "${arg_env:-}"
+        butl.global_array "__barg_option_${arg}_values" "${arg_values[@]}"
+        butl.global_array "__barg_option_${arg}_defaults" "${arg_defaults[@]-}"
+        butl.global_var "__barg_option_${arg}_multi" "${arg_multi:-}"
+        butl.global_array "__barg_option_${arg}_implies" "${arg_implies[@]-}"
+        butl.global_var "__barg_option_${arg}_hidden" "${arg_hidden:-}"
+
+        __barg_options+=("$arg")
+    elif [[ "$arg_short" || "$arg_long" ]]; then
+        # handle flags
+        butl.is_array __barg_flags || __barg_flags=()
+
+        butl.global_var "__barg_flag_${arg}_desc" "${arg_desc:-}"
+        butl.global_var "__barg_flag_${arg}_short" "${arg_short:-}"
+        butl.global_var "__barg_flag_${arg}_long" "${arg_long:-}"
+        butl.global_var "__barg_flag_${arg}_env" "${arg_env:-}"
+        butl.global_array "__barg_flag_${arg}_implies" "${arg_implies[@]-}"
+        butl.global_var "__barg_flag_${arg}_hidden" "${arg_hidden:-}"
+
+        __barg_flags+=("$arg")
+    else
+        if ((arg_multi)); then
+            if [[ "${__barg_catchall_arg:-}" ]]; then
+                butl.fail "cannot define more than one catchall argument"
+                return
+            fi
+
+            __barg_catchall_arg=$arg
+        fi
+
+        # handle arguments
+        butl.is_array __barg_args || __barg_args=()
+
+        butl.global_var "__barg_arg_${arg}_desc" "${arg_desc:-}"
+        butl.global_var "__barg_arg_${arg}_env" "${arg_env:-}"
+        butl.global_var "__barg_arg_${arg}_values" "${arg_values:-}"
+        butl.global_array "__barg_arg_${arg}_defaults" "${arg_defaults[@]-}"
+        butl.global_var "__barg_arg_${arg}_hidden" "${arg_hidden:-}"
+
+        __barg_args+=("$arg")
+    fi
+}
+
+# Resets internal variables to their clean state
+# shellcheck disable=SC2154
+barg.reset() {
+    unset __barg_disable_help
+
+    unset __barg_subcommands
+    unset "${!__barg_subcommand_@}"
+    # unset $(compgen -v | grep -e "^__barg_subcommand_")
+
+    unset __barg_flags
+    unset "${!__barg_flag_@}"
+    # unset $(compgen -v | grep -e "^__barg_flag_")
+
+    unset __barg_catchall_arg
+}
+
+# Checks if there are any subcommands
+__barg_has_subcommands() {
+    if ! butl.is_array __barg_subcommands; then
+        return 1
+    fi
+
+    local count_hidden=${1:-0}
+    if ((count_hidden && ${#__barg_subcommands[@]} > 0)); then
+        return 0
+    fi
+
+    local count=0
+    for subcommand in "${__barg_subcommands[@]}"; do
+        local var_subcommand_hidden="__barg_subcommand_${subcommand}_hidden"
+        local subcommand_hidden=${!var_subcommand_hidden:-}
+
+        if ! ((subcommand_hidden)); then
+            count=$((count += 1))
+        fi
+    done
+
+    ((count > 0))
+}
+
+# Checks if there are any options
+__barg_has_options() {
+    if ! butl.is_array __barg_options; then
+        return 1
+    fi
+
+    local count_hidden=${1:-0}
+    if ((count_hidden && ${#__barg_options[@]} > 0)); then
+        return 0
+    fi
+
+    local count=0
+    for option in "${__barg_options[@]}"; do
+        local var_option_hidden="__barg_option_${option}_hidden"
+        local option_hidden=${!var_option_hidden:-}
+
+        if ! ((option_hidden)); then
+            count=$((count += 1))
+        fi
+    done
+
+    ((count > 0))
+}
+
+# Checks if there are any flags
+__barg_has_flags() {
+    if ! butl.is_array __barg_flags; then
+        return 1
+    fi
+
+    local count_hidden=${1:-0}
+    if ((count_hidden && ${#__barg_flags[@]} > 0)); then
+        return 0
+    fi
+
+    local count=0
+    for flag in "${__barg_flags[@]}"; do
+        local var_flag_hidden="__barg_flag_${flag}_hidden"
+        local flag_hidden=${!var_flag_hidden:-}
+
+        if ! ((flag_hidden)); then
+            count=$((count += 1))
+        fi
+    done
+
+    ((count > 0))
+}
+
+# Checks if there are any args
+__barg_has_args() {
+    if ! butl.is_array __barg_args; then
+        return 1
+    fi
+
+    local count_hidden=${1:-0}
+    if ((count_hidden && ${#__barg_args[@]} > 0)); then
+        return 0
+    fi
+
+    local count=0
+    for arg in "${__barg_args[@]}"; do
+        local var_arg_hidden="__barg_arg_${arg}_hidden"
+        local arg_hidden=${!var_arg_hidden:-}
+
+        if ! ((arg_hidden)); then
+            count=$((count += 1))
+        fi
+    done
+
+    ((count > 0))
 }
 # BGEN__END /home/sdrm/projects/barg/lib/barg.sh
 
@@ -2468,7 +3111,6 @@ barg.print_subcommand_usage() {
 bgen() {
     barg.subcommand build build_project "builds the project"
     barg.subcommand run run_project "runs the project"
-    barg.subcommand run-debug build_project_to_stdout "outputs the project code"
     barg.subcommand debug debug_project "runs the project in bash debug mode"
     barg.subcommand test run_project_tests "runs tests"
     barg.subcommand test-debug run_project_tests_debug "outputs the project's test code"

@@ -9,6 +9,15 @@ __bgen_test_entrypoint() {
     local coverage_map=()
     local trails_map=()
 
+    if [[ "${BASH_EXECUTION_STRING:-}" ]]; then
+        __BGEN_TEST_SOURCE=$BASH_EXECUTION_STRING
+    elif [[ -f "${BASH_SOURCE[0]-}" ]]; then
+        __BGEN_TEST_SOURCE=$(<"${BASH_SOURCE[0]}")
+    else
+        echo "Cannot file source code" >&2
+        exit 1
+    fi
+
     # linemap shows at what lines each file starts and ends
     if [[ ! "${__BGEN_TEST_LINEMAP:-}" ]]; then
         local linemap=()
@@ -20,7 +29,7 @@ __bgen_test_entrypoint() {
             if [[ "$line" =~ ^\#[[:space:]]BGEN__ ]]; then
                 linemap+=("$line_nr ${line:2}")
             fi
-        done <<<"$BASH_EXECUTION_STRING"
+        done <<<"$__BGEN_TEST_SOURCE"
 
         local linemap_str
         linemap_str="$(__bgen_test_join_by $'\n' "${linemap[@]}")"
@@ -445,7 +454,7 @@ __bgen_test_normalize_trails_map() {
     local trail_start=0
 
     local line_nr
-    line_nr=$(__bgen_test_count_lines "$BASH_EXECUTION_STRING")
+    line_nr=$(__bgen_test_count_lines "$__BGEN_TEST_SOURCE")
     while IFS= read -r line; do
         if ((trails_map[line_nr])); then
             current_trail=$((line_nr))
@@ -472,7 +481,7 @@ __bgen_test_normalize_trails_map() {
         fi
 
         line_nr=$((line_nr - 1))
-    done < <(__bgen_test_reverse_lines <<<"$BASH_EXECUTION_STRING")
+    done < <(__bgen_test_reverse_lines <<<"$__BGEN_TEST_SOURCE")
 }
 
 __bgen_test_extend_coverage_hunk() {
@@ -710,9 +719,11 @@ __bgen_test_parse_coverage_map() {
 
             local file_line_count=$((line_nr - file_start - line_offset - 1))
 
-            __bgen_test_add_file_report "$current_file" \
-                "$(__bgen_test_join_by , "${covered_hunks[@]}")" \
-                "$file_covered_lines" "$file_line_count"
+            if [[ "$current_file" == "$PWD"* ]]; then
+                __bgen_test_add_file_report "$current_file" \
+                    "$(__bgen_test_join_by , "${covered_hunks[@]}")" \
+                    "$file_covered_lines" "$file_line_count"
+            fi
 
             total_covered=$((total_covered + file_covered_lines))
             total_lines=$((total_lines + file_line_count))
@@ -762,9 +773,11 @@ __bgen_test_make_coverage_report() {
     local total_covered=0
     local total_lines=0
 
+    echo "    Generating coverage report, please wait..."
+
     local line_nr=0
     __bgen_test_normalize_trails_map
-    __bgen_test_parse_coverage_map <<<"$BASH_EXECUTION_STRING"
+    __bgen_test_parse_coverage_map <<<"$__BGEN_TEST_SOURCE"
 
     if ((total_lines == 0)); then
         echo "    Nothing to cover :/"
@@ -785,6 +798,7 @@ __bgen_test_make_coverage_report() {
     fi
 
     # print file reports
+    printf '\e[1A\e[2K'
     __bgen_test_format_columns < <(
         printf '  \t%s\n' "${coverage_report[@]}"
         printf '\n  \tTOTAL COVERED %b(%s/%s)\t%b%3s%%%b\n' \
@@ -921,13 +935,15 @@ __bgen_test_run_single() {
         if ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))); then
             # workaround bash <4.4 quoting the content of the variables in declare's output
             local intermediary_coverage_map=()
-            local affect_intermediary_coverage_map="'intermediary_coverage_map+="
             local intermediary_trails_map=()
+
+            # use variables to escape single quotes and newlines in var expansion
+            local affect_intermediary_coverage_map="'intermediary_coverage_map+="
             local affect_intermediary_trails_map="'intermediary_trails_map+="
             local newline_sub="'"$'\n'"'"
             local newline=$'\n'
 
-            # also these versions for somereason concat array elements instead of replacing them
+            # also these versions concat array elements instead of replacing them
             # so we unset existing values before setting new ones
             : "${env_arrays//declare -a __bgen_test_covered_lines=\'/$affect_intermediary_coverage_map}"
             : "${_//declare -a __bgen_test_subshell_trails=\'/$affect_intermediary_trails_map}"
