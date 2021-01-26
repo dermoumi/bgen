@@ -328,6 +328,21 @@ __bgen_is_line_covered() {
     local line_nr=$1
     local line=$2
 
+    # check for nocov comments
+    if ((in_nocov)); then
+        if [[ "$line" =~ \#[[:space:]][[:space:]]*nocov[[:space:]]end($|[[:space:]]) ]]; then
+            in_nocov=
+        fi
+
+        return 0
+    elif [[ "$line" =~ \#[[:space:]][[:space:]]*nocov($|[[:space:]]) ]]; then
+        if [[ "$line" =~ \#[[:space:]][[:space:]]*nocov[[:space:]]begin($|[[:space:]]) ]]; then
+            in_nocov=1
+        fi
+
+        return 0
+    fi
+
     if ((coverage_map[line_nr])); then
         # line is in the coverage map
         return 0
@@ -522,7 +537,7 @@ __bgen_test_contains_str_end() {
 
 __bgen_test_contains_heredoc_start() {
     local str=$1
-    if [[ "$str" != *[^\<]\<\<[\-\"\_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
+    if [[ "$str" != *[^\<]\<\<[-\"_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
         return 1
     fi
 
@@ -598,6 +613,8 @@ __bgen_test_parse_coverage_map() {
 
     local in_heredoc=
     local in_array_decl=
+
+    local in_nocov=0
 
     while IFS= read -r line; do
         line_nr=$((line_nr + 1))

@@ -251,7 +251,7 @@ build_tests_to_stdout() {
 
     local testlib
 # BGEN__INCLUDE_STR_BEGIN
-    read -r -d '' testlib <<-"BGEN_EOF_836232660" || :
+    read -r -d '' testlib <<-"BGEN_EOF_2481831198" || :
 		#!/usr/bin/env bash
 		
 		bgen:import src/lib/asserts.sh
@@ -582,6 +582,21 @@ build_tests_to_stdout() {
 		    local line_nr=$1
 		    local line=$2
 		
+		    # check for nocov comments
+		    if ((in_nocov)); then
+		        if [[ "$line" =~ \#[[:space:]][[:space:]]*nocov[[:space:]]end($|[[:space:]]) ]]; then
+		            in_nocov=
+		        fi
+		
+		        return 0
+		    elif [[ "$line" =~ \#[[:space:]][[:space:]]*nocov($|[[:space:]]) ]]; then
+		        if [[ "$line" =~ \#[[:space:]][[:space:]]*nocov[[:space:]]begin($|[[:space:]]) ]]; then
+		            in_nocov=1
+		        fi
+		
+		        return 0
+		    fi
+		
 		    if ((coverage_map[line_nr])); then
 		        # line is in the coverage map
 		        return 0
@@ -776,7 +791,7 @@ build_tests_to_stdout() {
 		
 		__bgen_test_contains_heredoc_start() {
 		    local str=$1
-		    if [[ "$str" != *[^\<]\<\<[\-\"\_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
+		    if [[ "$str" != *[^\<]\<\<[-\"_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
 		        return 1
 		    fi
 		
@@ -852,6 +867,8 @@ build_tests_to_stdout() {
 		
 		    local in_heredoc=
 		    local in_array_decl=
+		
+		    local in_nocov=0
 		
 		    while IFS= read -r line; do
 		        line_nr=$((line_nr + 1))
@@ -1377,7 +1394,7 @@ build_tests_to_stdout() {
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_836232660
+		BGEN_EOF_2481831198
 # BGEN__INCLUDE_STR_END
     process_input <<<"$testlib"
 }
@@ -1461,7 +1478,7 @@ echo_header() {
     else
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
-        read -r -d '' default_header <<-"BGEN_EOF_23845587" || :
+        read -r -d '' default_header <<-"BGEN_EOF_223033576" || :
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1515,7 +1532,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_23845587
+			BGEN_EOF_223033576
 # BGEN__INCLUDE_STR_END
 
         echo "$default_header"
