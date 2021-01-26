@@ -3,3 +3,9 @@
 
 # name of the project
 project_name="bgen"
+
+# build dependencies
+build_deps=(
+    "dermoumi/butl"
+    "dermoumi/barg"
+)

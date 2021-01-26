@@ -3,39 +3,19 @@
 bgen:import build
 bgen:import run
 bgen:import test
+bgen:import barg
 
 # entrypoint
 bgen() {
-    local cmd="${1:-}"
+    barg.subcommand build build_project "builds the project"
+    barg.subcommand run run_project "runs the project"
+    barg.subcommand run-debug build_project_to_stdout "outputs the project code"
+    barg.subcommand debug debug_project "runs the project in bash debug mode"
+    barg.subcommand test run_project_tests "runs tests"
+    barg.subcommand test-debug run_project_tests_debug "outputs the project's test code"
 
-    if [[ "$cmd" == "build" ]]; then
-        build_project
-        return
-    fi
+    local subcommand=
+    barg.parse "$@"
 
-    if [[ "$cmd" == "run" ]]; then
-        shift
-        run_project "$@"
-        return
-    fi
-
-    if [[ "$cmd" == "debug" ]]; then
-        shift
-        debug_project "$@"
-        return
-    fi
-
-    if [[ "$cmd" == "test" ]]; then
-        shift
-        run_project_tests "$@"
-        return
-    fi
-
-    if [[ "$cmd" == "test-debug" ]]; then
-        shift
-        run_project_tests_debug "$@"
-        return
-    fi
-
-    build_project_to_stdout
+    "${subcommand[@]}"
 }

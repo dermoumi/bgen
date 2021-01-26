@@ -4,12 +4,15 @@
 set -o errexit
 # Exit on error inside any functions or subshells.
 set -o errtrace
-# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
-set -o nounset
 # Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
 set -o pipefail
-# Turn on traces, useful for debugging. Set _XTRACE to enable
-[[ "${_XTRACE:-}" ]] && set -o xtrace
+# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
+set -o nounset
+
+# TODO: use nounset only on bash 4.4+? earlier versions also complain when expanding empty arrays
+# if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
+# set -o nounset
+# fi
 
 # check whether script is source or directly executed
 if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
