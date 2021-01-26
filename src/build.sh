@@ -76,6 +76,8 @@ build_tests_to_stdout() {
     local failed=0
     local no_capture="${BGEN_NO_CAPTURE:-0}"
     local coverage="${BGEN_COVERAGE:-0}"
+    local coverage_experimental="${BGEN_COVERAGE_EXPERIMENTAL:-0}"
+    local coverage_debug="${BGEN_COVERAGE_DEBUG:-0}"
     local coverage_file="${BGEN_HTML_REPORT_FILE:-}"
     while (($#)); do
         case "$1" in
@@ -93,6 +95,16 @@ build_tests_to_stdout() {
             ;;
         -c | --coverage)
             coverage=1
+            shift
+            ;;
+        -C | --coverage-experimental)
+            coverage=1
+            coverage_experimental=1
+            shift
+            ;;
+        -D | --coverage-debug)
+            coverage=1
+            coverage_debug=1
             shift
             ;;
         -h | --html-report)
@@ -160,6 +172,8 @@ build_tests_to_stdout() {
 
     echo "BGEN_NO_CAPTURE=$no_capture"
     echo "BGEN_COVERAGE=$coverage"
+    echo "BGEN_COVERAGE_EXPERIMENTAL=$coverage_experimental"
+    echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
     printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 
     local testlib

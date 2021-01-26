@@ -296,15 +296,13 @@ __bgen_test_debug_handler() {
     fi
     export __bgen_test_current_line_nr=$line_nr
 
-    if [[ "${XTRACE:-}" == "extra" ]]; then
+    if ((${BGEN_COVERAGE_DEBUG:-})); then
         local source_line_nr=
         local source_file=
         __bgen_test_get_source_line "$line_nr"
         printf -- '- %s %s %-4s %-4s %s %s\n' "$__bgen_test_main_subshell" "$BASH_SUBSHELL" \
             "$source_line_nr" "$line_nr" \
             "${__bgen_test_covered_lines[$line_nr]}" "$cmd" >&2
-    elif [[ "${XTRACE:-}" ]]; then
-        printf -- '- %-4s %s %s\n' "$line_nr" "${__bgen_test_covered_lines[$line_nr]}" "$cmd" >&2
     fi
 
     # restore the original value of $_
@@ -467,7 +465,7 @@ __bgen_test_extend_coverage_hunk() {
         hunk_end=$((hunk_end + pending_lines + 1))
     else
         local line_nr_offset=$((line_nr - file_start - line_offset))
-        hunk_start=$line_nr_offset
+        hunk_start=$((line_nr_offset - pending_lines))
         hunk_end=$line_nr_offset
     fi
     file_covered_lines=$((file_covered_lines + pending_lines + 1))
@@ -496,17 +494,16 @@ __bgen_test_contains_str_start() {
     str_search_offset=0
     quote_type=
     while ((i < ${#str})); do
-        # printf "${str:$i:1}"
-        if [[ "${str:$i:1}" =~ [\'\"] ]] && ( ((i == 0)) || [[ "${str:$((i - 1)):1}" != \\ ]]); then
+        local char=${str:$i:1}
+        if [[ "$char" =~ [\'\"] ]] && ( ((i == 0)) || [[ "${str:$((i - 1)):1}" != \\ ]]); then
             if [[ ! "$quote_type" ]]; then
-                quote_type=${str:$i:1}
-            elif [[ "${str:$i:1}" == "$quote_type" ]]; then
+                quote_type=$char
+            elif [[ "$char" == "$quote_type" ]]; then
                 quote_type=
             fi
         fi
         i=$((i + 1))
     done
-    # echo
 
     [[ "$quote_type" ]]
 }
@@ -519,11 +516,11 @@ __bgen_test_contains_str_end() {
         return 1
     fi
 
-    : "${str%%[\'\"]*}"
+    : "${str%%[$quote_type]*}"
     str_search_offset=$((${#_} + 1))
 }
 
-__bgen_test_contains_heredoc() {
+__bgen_test_contains_heredoc_start() {
     local str=$1
     if [[ "$str" != *[^\<]\<\<[\-\"\_[:alnum:]]* || "$str" =~ ^[[:space:]]*\# ]]; then
         return 1
@@ -547,6 +544,39 @@ __bgen_test_contains_heredoc_end() {
     [[ "$token" && "$str" =~ ^[$'\t']*"$token"$ ]]
 }
 
+__bgen_test_contains_array_start() {
+    local str=$1
+    if ! [[ "$str" =~ [_[:alnum:]]\=\( ]] || [[ "$str" =~ ^[[:space:]]*\# ]]; then
+        return 1
+    fi
+
+    local i=0
+    local open=0
+    local quote_type=
+    while ((i < ${#str})); do
+        if [[ "${str:$i:1}" =~ [\'\"] ]] && ( ((i == 0)) || [[ "${str:$((i - 1)):1}" != \\ ]]); then
+            if [[ ! "$quote_type" ]]; then
+                quote_type=${str:$i:1}
+            elif [[ "${str:$i:1}" == "$quote_type" ]]; then
+                quote_type=
+            fi
+        elif ((i > 2)) && [[ ! "$quote_type" ]]; then
+            if [[ "${str:$((i - 1)):2}" == '=(' && "${str:$((i - 2)):1}" != \\ ]]; then
+                open=1
+            elif [[ "${str:$i:1}" == ')' && "${str:$((i - 1))}" != \\ ]]; then
+                open=0
+            fi
+        fi
+        i=$((i + 1))
+    done
+
+    ((open))
+}
+
+__bgen_test_contains_array_end() {
+    [[ "$1" =~ ^[[:space:]]*\) ]]
+}
+
 # parses coverage map
 __bgen_test_parse_coverage_map() {
     local current_file=${1:-}
@@ -563,9 +593,11 @@ __bgen_test_parse_coverage_map() {
     local is_prev_line_covered=1
 
     local in_string=
+    local string_covered=0
     local str_search_offset=0
 
     local in_heredoc=
+    local in_array_decl=
 
     while IFS= read -r line; do
         line_nr=$((line_nr + 1))
@@ -573,61 +605,86 @@ __bgen_test_parse_coverage_map() {
         : "${line%${line##*[![:space:]]}}"  # strip any trailing whitespace if any
         local line=${_#${_%%[![:space:]]*}} # strip leading whitepsace if any
 
-        if __bgen_test_contains_str_end "$line" "$in_string"; then
-            in_string=
-        fi
-
-        if __bgen_test_contains_heredoc_end "$line" "$in_heredoc"; then
-            in_heredoc=
-        fi
-
-        if [[ "$in_string" || "$in_heredoc" ]]; then
-            if ((coverage_map[line_nr])); then
-                __bgen_test_extend_coverage_hunk
-                is_prev_line_covered=1
-                pending_lines=0
-            else
-                pending_lines=$((pending_lines + 1))
+        if ((${BGEN_COVERAGE_EXPERIMENTAL:-})); then
+            if __bgen_test_contains_str_end "$line" "$in_string"; then
+                in_string=
+                if ((string_covered)); then
+                    __bgen_test_extend_coverage_hunk
+                    pending_lines=0
+                    continue
+                fi
+                string_covered=0
             fi
-            continue
-        fi
 
-        local heredoc_token=
-        if __bgen_test_contains_heredoc "$line"; then
-            if ((coverage_map[line_nr])); then
-                __bgen_test_extend_coverage_hunk
-                is_prev_line_covered=1
-                pending_lines=0
-            else
-                pending_lines=$((pending_lines + 1))
+            if __bgen_test_contains_heredoc_end "$line" "$in_heredoc"; then
+                in_heredoc=
             fi
-            in_heredoc=$heredoc_token
-            continue
-        fi
 
-        local quote_type=
-        if __bgen_test_contains_str_start "$line"; then
-            if ((coverage_map[line_nr])); then
-                __bgen_test_extend_coverage_hunk
-                is_prev_line_covered=1
-                pending_lines=0
-            else
-                pending_lines=$((pending_lines + 1))
+            if ((in_array_decl)) && __bgen_test_contains_array_end "$line"; then
+                in_array_decl=
             fi
-            in_string=$quote_type
-            continue
-        fi
 
-        # lines ending with $(
-        if [[ "$line" =~ ([^\\]|^)\$\($ ]]; then
-            if ((coverage_map[line_nr])); then
-                __bgen_test_extend_coverage_hunk
-                is_prev_line_covered=1
-                pending_lines=0
-            else
-                pending_lines=$((pending_lines + 1))
+            if [[ "$in_string" || "$in_heredoc" || "$in_array_decl" ]]; then
+                if ((coverage_map[line_nr])); then
+                    __bgen_test_extend_coverage_hunk
+                    is_prev_line_covered=1
+                    pending_lines=0
+                else
+                    pending_lines=$((pending_lines + 1))
+                fi
+                continue
             fi
-            continue
+
+            local heredoc_token=
+            if __bgen_test_contains_heredoc_start "$line"; then
+                if ((coverage_map[line_nr])); then
+                    __bgen_test_extend_coverage_hunk
+                    is_prev_line_covered=1
+                    pending_lines=0
+                else
+                    pending_lines=$((pending_lines + 1))
+                fi
+                in_heredoc=$heredoc_token
+                continue
+            fi
+
+            local quote_type=
+            if __bgen_test_contains_str_start "$line"; then
+                if ((coverage_map[line_nr])); then
+                    __bgen_test_extend_coverage_hunk
+                    is_prev_line_covered=1
+                    string_covered=1
+                    pending_lines=0
+                else
+                    pending_lines=$((pending_lines + 1))
+                fi
+                in_string=$quote_type
+                continue
+            fi
+
+            if __bgen_test_contains_array_start "$line"; then
+                if ((coverage_map[line_nr])); then
+                    __bgen_test_extend_coverage_hunk
+                    is_prev_line_covered=1
+                    pending_lines=0
+                else
+                    pending_lines=$((pending_lines + 1))
+                fi
+                in_array_decl=1
+                continue
+            fi
+
+            # lines ending with $(
+            if [[ "$line" =~ ([^\\]|^)\$\($ ]]; then
+                if ((coverage_map[line_nr])); then
+                    __bgen_test_extend_coverage_hunk
+                    is_prev_line_covered=1
+                    pending_lines=0
+                else
+                    pending_lines=$((pending_lines + 1))
+                fi
+                continue
+            fi
         fi
 
         if [[ "$line" =~ ^\#[[:space:]]BGEN__END[[:space:]] ]]; then
@@ -660,7 +717,7 @@ __bgen_test_parse_coverage_map() {
         fi
 
         # lines ending with backslash
-        if [[ "$line" =~ ([^\\]|^)[\\]$ ]]; then
+        if [[ "$line" =~ ([^\\]|^)\\$ ]]; then
             pending_lines=$((pending_lines + 1))
             continue
         fi

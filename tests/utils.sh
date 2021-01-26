@@ -6,10 +6,10 @@ test_bail_prints_message_and_exits() {
     local output
     output=$(
         assert_exits_with_code 42 \
-            bail "this is a test message" 42 \
+            bail "2this is a test message" 42 \
             2>&1
     )
-    assert_eq "$output" "this is a test message"
+    assert_eq "$output" "2this is a test message"
 }
 
 test_trim_str_removes_leading_and_trailing_spaces() {
@@ -24,9 +24,9 @@ test_debug_subshells() {
 
     local array_decl=(
         "elem1"
-        "elem2"
+        "$(echo $((6 * 7)))"
         "elem3"
-    )
+    ) # closing parenthesis should first thing in the line
 
     # standalone subshell
     (
@@ -34,7 +34,7 @@ test_debug_subshells() {
         if true; then
             true
         fi
-        echo "array" "${array_decl[2]}" >&2
+        echo "array" "${array_decl[1]}" >&2
         if true; then
             true
         fi
@@ -55,12 +55,17 @@ MYDOC
 
     echo "$var"
 
+    # only use one multiline string per command
     echo '
         hello world
         cave johnson here
     a' "b
         assdfa
     "
+
+    echo hello "
+        this works?
+        let's see"
 
     local output
     output=$(
