@@ -31,6 +31,9 @@ build_project() {
 }
 
 build_project_to_stdout() {
+    # set a constant seed to have consistent builds
+    RANDOM=42
+
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()

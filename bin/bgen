@@ -107,6 +107,9 @@ build_project() {
 }
 
 build_project_to_stdout() {
+    # set a constant seed to have consistent builds
+    RANDOM=42
+
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
     local imported_files=()
@@ -254,7 +257,7 @@ build_tests_to_stdout() {
 
     local testlib
 # BGEN__INCLUDE_STR_BEGIN
-    read -r -d '' testlib <<-"BGEN_EOF_22998647" || :
+    read -r -d '' testlib <<-"BGEN_EOF_1777226794" || :
 		#!/usr/bin/env bash
 		
 		bgen:import src/lib/asserts.sh
@@ -1397,7 +1400,7 @@ build_tests_to_stdout() {
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_22998647
+		BGEN_EOF_1777226794
 # BGEN__INCLUDE_STR_END
     process_input <<<"$testlib"
 }
@@ -1481,7 +1484,7 @@ echo_header() {
     else
         local default_header
 # BGEN__INCLUDE_STR_BEGIN
-        read -r -d '' default_header <<-"BGEN_EOF_1460413156" || :
+        read -r -d '' default_header <<-"BGEN_EOF_143524388" || :
 			#!/usr/bin/env bash
 			
 			# Exit on error. Append "|| true" if you expect an error.
@@ -1538,7 +1541,7 @@ echo_header() {
 			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_1460413156
+			BGEN_EOF_143524388
 # BGEN__INCLUDE_STR_END
 
         echo "$default_header"
