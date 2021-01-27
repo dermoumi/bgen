@@ -11,7 +11,6 @@ bgen() {
     barg.subcommand run run_project "runs the project"
     barg.subcommand debug debug_project "runs the project in bash debug mode"
     barg.subcommand test run_project_tests "runs tests"
-    barg.subcommand test-debug run_project_tests_debug "outputs the project's test code"
 
     local subcommand=
     barg.parse "$@"

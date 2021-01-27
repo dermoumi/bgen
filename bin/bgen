@@ -114,14 +114,26 @@ butl.global_var() {
 butl.global_array() {
     local var_name=$1
     shift
-    eval "$var_name=($(printf '%q ' "$@"))"
+
+    if (($#)); then
+        eval "$var_name=($(printf '%q ' "$@"))"
+    else
+        eval "$var_name=()"
+    fi
 }
 
 # Copies an array to another by name, compatible with bash 3.2
 # @param source the array to copy from
 # @param target the array to copy to
 butl.copy_array() {
-    eval "$2=( \"\${""$1""[@]}\" )"
+    local source=$1
+    local target=$2
+
+    if ! butl.is_array "$source" || eval "((\${#${source}[@]} == 0))"; then
+        butl.global_array "$target"
+    else
+        eval "$target=( \"\${""$source""[@]}\" )"
+    fi
 }
 
 # checks if itm is in an array
@@ -2154,12 +2166,16 @@ barg.parse() {
     fi
 
     # Fill from env or set default values for unset options
-    for option in "${__barg_options[@]}"; do
+    for option in "${__barg_options[@]-}"; do
+        if [[ ! "$option" ]]; then
+            continue
+        fi
+
         # Skip if variable is declared, or if an array; not empty.
         if ! butl.is_declared "$option"; then
             continue
         else
-            local var_option_set="__bgen_option_${option}_set"
+            local var_option_set="__barg_option_${option}_set"
             if ((${!var_option_set-})); then
                 continue
             fi
@@ -2169,36 +2185,34 @@ barg.parse() {
 
         # Set default value from enviornment
         local var_option_env="__barg_option_${option}_env"
-        local option_env=${!var_option_env}
+        local option_env=${!var_option_env-}
         if [[ "$option_env" && "${!option_env+x}" ]]; then
             # shellcheck disable=SC2059
             printf -v "$option" "${!option_env}"
 
             option_is_updated=1
+        elif butl.is_array "$option"; then
+            butl.copy_array "$option" "__barg_option_${option}_defaults"
+
+            option_is_updated=1
         else
-            if butl.is_array "$option"; then
-                butl.copy_array "$option" "__barg_option_${option}_defaults"
+            local option_defaults=()
+            butl.copy_array "__barg_option_${option}_defaults" "option_defaults"
+
+            if ((${#option_defaults[@]})); then
+                # shellcheck disable=SC2059
+                printf -v "$option" "${option_defaults[0]}"
 
                 option_is_updated=1
-            else
-                local option_defaults=()
-                butl.copy_array "__barg_option_${option}_defaults" "option_defaults"
-
-                if ((${#option_defaults[@]})); then
-                    # shellcheck disable=SC2059
-                    printf -v "$option" "${option_defaults[0]}"
-
-                    option_is_updated=1
-                fi
             fi
         fi
 
         # Update implied flags
         if ((option_is_updated)); then
             # mark the option as set
-            printf -v "__bgen_option_${option}_set" 1
-            local option_implies=()
+            printf -v "__barg_option_${option}_set" 1
 
+            local option_implies=()
             butl.copy_array "__barg_option_${option}_implies" "option_implies"
             for implied_flag in "${option_implies[@]-}"; do
                 if [[ ! "$implied_flag" ]]; then
@@ -2217,6 +2231,10 @@ barg.parse() {
 
     # Fill from env or set default values for unset flags
     for flag in "${__barg_flags[@]-}"; do
+        if [[ ! "$flag" ]]; then
+            continue
+        fi
+
         # Skip if variable is not declared or not empty
         if ! butl.is_declared "$flag" || [[ "${!flag:-}" ]]; then
             continue
@@ -2224,7 +2242,7 @@ barg.parse() {
 
         # Set default value from environment
         local var_flag_env="__barg_flag_${flag}_env"
-        local flag_env=${!var_flag_env}
+        local flag_env=${!var_flag_env-}
         if [[ ! "$flag_env" ]] || ! ((${!flag_env:-})); then
             printf -v "$flag" ''
             continue
@@ -2253,7 +2271,7 @@ barg.parse() {
         done
     done
 
-    if (("${#__barg_subcommands[@]}")); then
+    if __barg_has_subcommands 1; then
         barg.print_usage
         exit 1
     fi
@@ -2317,7 +2335,7 @@ __barg_parse_option() {
     shift_count=$value_count
 
     # mark the option as set
-    printf -v "__bgen_option_${option}_set" 1
+    printf -v "__barg_option_${option}_set" 1
 }
 
 __barg_parse_flag() {
@@ -2491,26 +2509,6 @@ barg.print_usage() {
     printf '    %s%s\n' "$process_base" "$(printf ' %s' "${arg_list[@]-}")"
     section_break=1
 
-    # Print subcommands if any
-    subcommands_text=$(
-        for subcommand in "${__barg_subcommands[@]-}"; do
-            [[ "$subcommand" ]] || continue
-            local subcommand_desc_var="__barg_subcommand_${subcommand//-/_}_desc"
-            local subcommand_desc="${!subcommand_desc_var:-}"
-            # shellcheck disable=SC2154
-            printf '    %b%s%b\t %s\n' "$__barg_style_arg" "$subcommand" \
-                "$__barg_style_reset" "$subcommand_desc"
-        done
-    )
-
-    if [[ "$subcommands_text" ]]; then
-        [[ "$section_break" ]] && echo
-        printf '%bSUBCOMMANDS:%b\n' "$__barg_style_title" "$__barg_style_reset"
-        butl.columns ' ' <<<"$subcommands_text"
-
-        section_break=1
-    fi
-
     # shellcheck disable=SC2154
     local flag_desc_cr_threshold=$__barg_usage_flag_desc_length_threshold
     # shellcheck disable=SC2154
@@ -2518,241 +2516,10 @@ barg.print_usage() {
     # shellcheck disable=SC2154
     local arg_desc_cr_threschold=$__barg_usage_arg_desc_length_threshold
 
-    # Print flags if any
-    flags_text=$(
-        for flag in "${__barg_flags[@]-}"; do
-            if [[ ! "$flag" ]]; then
-                continue
-            fi
-
-            local flag_desc_var="__barg_flag_${flag}_desc"
-            local flag_desc="${!flag_desc_var:-}"
-
-            local flag_short_var="__barg_flag_${flag}_short"
-            local flag_short="${!flag_short_var:-}"
-
-            local flag_long_var="__barg_flag_${flag}_long"
-            local flag_long="${!flag_long_var:-}"
-
-            local flag_env_var="__barg_flag_${flag}_env"
-            local flag_env="${!flag_env_var:-}"
-
-            if [[ ! "${flag_short:-}${flag_long:-}" ]]; then
-                continue
-            fi
-
-            if [[ "${flag_short:-}" ]]; then
-                printf '    %b-%s%b' "$__barg_style_arg" "$flag_short" "$__barg_style_reset"
-            else
-                printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
-            fi
-
-            if [[ "${flag_short:-}" && "${flag_long:-}" ]]; then
-                printf ',\t'
-            else
-                printf '\t'
-            fi
-
-            if [[ "${flag_long:-}" ]]; then
-                printf '%b--%s%b' "$__barg_style_arg" "$flag_long" "$__barg_style_reset"
-            else
-                printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
-            fi
-
-            local desc="$flag_desc "
-
-            if [[ "${flag_env}" ]]; then
-                if __barg_is_lastline_too_long "$flag_desc_cr_threshold" "$desc"; then
-                    desc+=$'\n'
-                fi
-
-                # shellcheck disable=SC2154
-                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' "$__barg_style_info" \
-                    "$__barg_style_info_var" "$flag_env" "$__barg_style_info_equals" \
-                    "$__barg_style_info_value" "${!flag_env:-}" \
-                    "$__barg_style_info" "$__barg_style_reset")
-            fi
-
-            : "${desc//$'\n'/$'\n\t\t '}"
-            printf '\t %s\n' "${_::-1}"
-        done
-    )
-
-    if [[ "$flags_text" ]]; then
-        if [[ "$section_break" ]]; then
-            echo
-        fi
-
-        printf '%bFLAGS:%b\n' "$__barg_style_title" "$__barg_style_reset"
-        butl.columns ' ' <<<"$flags_text"
-
-        section_break=1
-    fi
-
-    # Print options if any
-    options_text=$(
-        for option in "${__barg_options[@]-}"; do
-            if [[ ! "$option" ]]; then
-                continue
-            fi
-
-            local option_desc_var="__barg_option_${option}_desc"
-            local option_desc=${!option_desc_var:-}
-
-            local option_short_var="__barg_option_${option}_short"
-            local option_short=${!option_short_var:-}
-
-            local option_long_var="__barg_option_${option}_long"
-            local option_long=${!option_long_var:-}
-
-            local option_env_var="__barg_option_${option}_env"
-            local option_env=${!option_env_var:-}
-
-            local option_values_var="__barg_option_${option}_values"
-            local option_values
-            butl.copy_array "$option_values_var" option_values
-
-            local option_defaults_var="__barg_option_${option}_defaults"
-            local option_defaults
-            butl.copy_array "$option_defaults_var" option_defaults
-
-            if [[ ! "${option_short:-}${option_long:-}" ]]; then
-                continue
-            fi
-
-            if [[ "${option_short:-}" ]]; then
-                printf '    %b-%s%b' "$__barg_style_arg" "$option_short" "$__barg_style_reset"
-            else
-                printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
-            fi
-
-            if [[ "${option_short:-}" && "${option_long:-}" ]]; then
-                printf ',\t'
-            else
-                printf '\t'
-            fi
-
-            if [[ "${option_long:-}" ]]; then
-                printf '%b--%s%b' "$__barg_style_arg" "$option_long" "$__barg_style_reset"
-            else
-                printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
-            fi
-
-            if [[ "${option_values[0]-}" ]]; then
-                local values_str
-                values_str=$(printf ' <%s>' "${option_values[@]}")
-                if [[ ! "${option_long:-}" ]]; then
-                    values_str=${values_str:1}
-                fi
-                printf '%b%s%b' "$__barg_style_arg" "$values_str" "$__barg_style_reset"
-            fi
-
-            local desc="$option_desc "
-
-            if [[ "${option_defaults[0]-}" ]]; then
-                if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
-                    desc+=$'\n'
-                fi
-
-                local join_separator="$__barg_style_reset, $__barg_style_info_value"
-                desc+=$(printf '%b[default: %b%b%b]%b ' "$__barg_style_info" "$__barg_style_info_value" \
-                    "$(butl.join_by "$join_separator" "${option_defaults[@]}")" \
-                    "$__barg_style_info" "$__barg_style_reset")
-            fi
-
-            if [[ "${option_env}" ]]; then
-                if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
-                    desc+=$'\n'
-                fi
-
-                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' "$__barg_style_info" \
-                    "$__barg_style_info_var" "$option_env" "$__barg_style_info_equals" \
-                    "$__barg_style_info_value" "${!option_env:-}" \
-                    "$__barg_style_info" "$__barg_style_reset")
-            fi
-
-            : "${desc//$'\n'/$'\n\t\t '}"
-            printf '\t %s\n' "${_::-1}"
-        done
-    )
-
-    if [[ "$options_text" ]]; then
-        if [[ "$section_break" ]]; then
-            echo
-        fi
-
-        printf '%bOPTIONS:%b\n' "$__barg_style_title" "$__barg_style_reset"
-        butl.columns ' ' <<<"$options_text"
-
-        section_break=1
-    fi
-
-    # Print args if any
-    args_text=$(
-        for arg in "${__barg_args[@]-}"; do
-            if [[ ! "$arg" ]]; then
-                continue
-            fi
-
-            local arg_desc_var="__barg_arg_${arg}_desc"
-            local arg_desc=${!arg_desc_var:-}
-
-            local arg_env_var="__barg_arg_${arg}_env"
-            local arg_env=${!arg_env_var:-}
-
-            local arg_values_var="__barg_arg_${arg}_values"
-            local arg_values
-            butl.copy_array "$arg_values_var" arg_values
-
-            local arg_defaults_var="__barg_arg_${arg}_defaults"
-            local arg_defaults
-            butl.copy_array "$arg_defaults_var" arg_defaults
-
-            if [[ "${arg_values[0]-}" ]]; then
-                printf '   %b%s%b' "$__barg_style_arg" \
-                    "$(printf ' <%s>' "${arg_values[@]}")" "$__barg_style_reset"
-            fi
-
-            local desc="$arg_desc "
-
-            if [[ "${arg_defaults[0]-}" ]]; then
-                if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
-                    desc+=$'\n'
-                fi
-
-                local join_separator="$__barg_style_reset, $__barg_style_info_value"
-                desc+=$(printf '%b[default: %b%b%b]%b ' \
-                    "$__barg_style_info" "$__barg_style_info_value" \
-                    "$(butl.join_by "$join_separator" "${arg_defaults[@]}")" \
-                    "$__barg_style_info" "$__barg_style_reset")
-            fi
-
-            if [[ "${arg_env}" ]]; then
-                if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
-                    desc+=$'\n'
-                fi
-
-                desc+=$(printf '%b[env: %b%s%b=%b%s%b]%b ' \
-                    "$__barg_style_info" "$__barg_style_info_var" \
-                    "$arg_env" "$__barg_style_info_equals" "$__barg_style_info_value" \
-                    "${!arg_env:-}" "$__barg_style_info" "$__barg_style_reset")
-            fi
-
-            : "${desc//$'\n'/$'\n\t '}"
-            printf '\t %s\n' "${_::-1}"
-        done
-    )
-
-    if [[ "$args_text" ]]; then
-        if [[ "$section_break" ]]; then
-            echo
-        fi
-
-        printf '%bARGUMENTS:%b\n' "$__barg_style_title" "$__barg_style_reset"
-        butl.columns ' ' <<<"$args_text"
-
-        section_break=1
-    fi
+    __barg_print_usage_section "SUBCOMMANDS" "$(__barg_print_subcommands)"
+    __barg_print_usage_section "FLAGS" "$(__barg_print_flags)"
+    __barg_print_usage_section "OPTIONS" "$(__barg_print_options)"
+    __barg_print_usage_section "ARGUMENTS" "$(__barg_print_args)"
 }
 
 # Print usage text for a given subcommand
@@ -2782,6 +2549,229 @@ __barg_is_lastline_too_long() {
     : "${2##*$'\n'}"
     : "$(butl.strip_ansi_style "$_")"
     ((${#_} > size_threshold))
+}
+
+__barg_print_usage_section() {
+    local title=$1
+    local text=$2
+
+    if [[ "$text" ]]; then
+        if ((section_break)); then
+            echo
+        fi
+
+        printf '%b%s:%b\n' "$__barg_style_title" "$title" "$__barg_style_reset"
+        butl.columns ' ' <<<"$text"
+
+        section_break=1
+    fi
+}
+
+__barg_print_subcommands() {
+    for subcommand in "${__barg_subcommands[@]-}"; do
+        [[ "$subcommand" ]] || continue
+        local subcommand_desc_var="__barg_subcommand_${subcommand//-/_}_desc"
+        local subcommand_desc="${!subcommand_desc_var:-}"
+        # shellcheck disable=SC2154
+        printf '    %b%s%b\t %s\n' "$__barg_style_arg" "$subcommand" \
+            "$__barg_style_reset" "$subcommand_desc"
+    done
+}
+
+__barg_print_flags() {
+    for flag in "${__barg_flags[@]-}"; do
+        if [[ ! "$flag" ]]; then
+            continue
+        fi
+
+        local flag_desc_var="__barg_flag_${flag}_desc"
+        local flag_desc="${!flag_desc_var:-}"
+
+        local flag_short_var="__barg_flag_${flag}_short"
+        local flag_short="${!flag_short_var:-}"
+
+        local flag_long_var="__barg_flag_${flag}_long"
+        local flag_long="${!flag_long_var:-}"
+
+        local flag_env_var="__barg_flag_${flag}_env"
+        local flag_env="${!flag_env_var:-}"
+
+        if [[ ! "${flag_short:-}${flag_long:-}" ]]; then
+            continue
+        fi
+
+        if [[ "${flag_short:-}" ]]; then
+            printf '    %b-%s%b' "$__barg_style_arg" "$flag_short" "$__barg_style_reset"
+        else
+            printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
+        fi
+
+        if [[ "${flag_short:-}" && "${flag_long:-}" ]]; then
+            printf ',\t'
+        else
+            printf '\t'
+        fi
+
+        if [[ "${flag_long:-}" ]]; then
+            printf '%b--%s%b' "$__barg_style_arg" "$flag_long" "$__barg_style_reset"
+        else
+            printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
+        fi
+
+        local desc=" $flag_desc"
+
+        if [[ "${flag_env}" ]]; then
+            if __barg_is_lastline_too_long "$flag_desc_cr_threshold" "$desc"; then
+                desc+=$'\n'
+            fi
+
+            # shellcheck disable=SC2154
+            desc+=$(printf ' %b[env: %b%s%b=%b%s%b]%b' "$__barg_style_info" \
+                "$__barg_style_info_var" "$flag_env" "$__barg_style_info_equals" \
+                "$__barg_style_info_value" "${!flag_env:-}" \
+                "$__barg_style_info" "$__barg_style_reset")
+        fi
+
+        : "${desc//$'\n'/$'\n\t\t '}"
+        printf '\t %s\n' "$_"
+    done
+}
+
+__barg_print_options() {
+    for option in "${__barg_options[@]-}"; do
+        if [[ ! "$option" ]]; then
+            continue
+        fi
+
+        local option_desc_var="__barg_option_${option}_desc"
+        local option_desc=${!option_desc_var:-}
+
+        local option_short_var="__barg_option_${option}_short"
+        local option_short=${!option_short_var:-}
+
+        local option_long_var="__barg_option_${option}_long"
+        local option_long=${!option_long_var:-}
+
+        local option_env_var="__barg_option_${option}_env"
+        local option_env=${!option_env_var:-}
+
+        local option_values
+        butl.copy_array "__barg_option_${option}_values" option_values
+
+        local option_defaults
+        butl.copy_array "__barg_option_${option}_defaults" option_defaults
+
+        if [[ ! "${option_short:-}${option_long:-}" ]]; then
+            continue
+        fi
+
+        if [[ "${option_short:-}" ]]; then
+            printf '    %b-%s%b' "$__barg_style_arg" "$option_short" "$__barg_style_reset"
+        else
+            printf '    %b  %b' "$__barg_style_arg" "$__barg_style_reset"
+        fi
+
+        if [[ "${option_short:-}" && "${option_long:-}" ]]; then
+            printf ',\t'
+        else
+            printf '\t'
+        fi
+
+        if [[ "${option_long:-}" ]]; then
+            printf '%b--%s%b' "$__barg_style_arg" "$option_long" "$__barg_style_reset"
+        else
+            printf '%b%b' "$__barg_style_arg" "$__barg_style_reset"
+        fi
+
+        if [[ "${option_values[0]-}" ]]; then
+            local values_str
+            values_str=$(printf ' <%s>' "${option_values[@]}")
+            if [[ ! "${option_long:-}" ]]; then
+                values_str=${values_str:1}
+            fi
+            printf '%b%s%b' "$__barg_style_arg" "$values_str" "$__barg_style_reset"
+        fi
+
+        local desc="$option_desc"
+
+        if [[ "${option_defaults[0]-}" ]]; then
+            if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
+                desc+=$'\n'
+            fi
+
+            local join_separator="$__barg_style_reset, $__barg_style_info_value"
+            desc+=$(printf ' %b[default: %b%b%b]%b' "$__barg_style_info" "$__barg_style_info_value" \
+                "$(butl.join_by "$join_separator" "${option_defaults[@]}")" \
+                "$__barg_style_info" "$__barg_style_reset")
+        fi
+
+        if [[ "${option_env}" ]]; then
+            if __barg_is_lastline_too_long "$option_desc_cr_threshold" "$desc"; then
+                desc+=$'\n'
+            fi
+
+            desc+=$(printf ' %b[env: %b%s%b=%b%s%b]%b' "$__barg_style_info" \
+                "$__barg_style_info_var" "$option_env" "$__barg_style_info_equals" \
+                "$__barg_style_info_value" "${!option_env:-}" \
+                "$__barg_style_info" "$__barg_style_reset")
+        fi
+
+        : "${desc//$'\n'/$'\n\t\t'}"
+        printf '\t %s\n' "$_"
+    done
+}
+
+__barg_print_args() {
+    for arg in "${__barg_args[@]-}"; do
+        if [[ ! "$arg" ]]; then
+            continue
+        fi
+
+        local arg_desc_var="__barg_arg_${arg}_desc"
+        local arg_desc=${!arg_desc_var:-}
+
+        local arg_env_var="__barg_arg_${arg}_env"
+        local arg_env=${!arg_env_var:-}
+
+        local arg_values
+        butl.copy_array "__barg_arg_${arg}_values" arg_values
+
+        local arg_defaults
+        butl.copy_array "__barg_arg_${arg}_defaults" arg_defaults
+
+        if [[ "${arg_values[0]-}" ]]; then
+            printf '   %b%s%b' "$__barg_style_arg" \
+                "$(printf ' <%s>' "${arg_values[@]}")" "$__barg_style_reset"
+        fi
+
+        local desc=" $arg_desc"
+
+        if [[ "${arg_defaults[0]-}" ]]; then
+            if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
+                desc+=$'\n'
+            fi
+
+            local join_separator="$__barg_style_reset, $__barg_style_info_value"
+            desc+=$(printf ' %b[default: %b%b%b]%b' \
+                "$__barg_style_info" "$__barg_style_info_value" \
+                "$(butl.join_by "$join_separator" "${arg_defaults[@]}")" \
+                "$__barg_style_info" "$__barg_style_reset")
+        fi
+
+        if [[ "${arg_env}" ]]; then
+            if __barg_is_lastline_too_long "$arg_desc_cr_threschold" "$desc"; then
+                desc+=$'\n'
+            fi
+
+            desc+=$(printf ' %b[env: %b%s%b=%b%s%b]%b' \
+                "$__barg_style_info" "$__barg_style_info_var" \
+                "$arg_env" "$__barg_style_info_equals" "$__barg_style_info_value" \
+                "${!arg_env:-}" "$__barg_style_info" "$__barg_style_reset")
+        fi
+
+        : "${desc//$'\n'/$'\n\t'}"
+        printf '\t %s\n' "$_"
+    done
 }
 # BGEN__END /home/sdrm/projects/barg/lib/usage.sh
 
@@ -2840,7 +2830,6 @@ barg.arg() {
     local arg_defaults=()
     local arg_implies=()
     local arg_multi=
-    local arg_catchall=
 
     local arg_desc=
     local arg_short=
@@ -2952,11 +2941,11 @@ barg.arg() {
         butl.global_var "__barg_option_${arg}_short" "${arg_short:-}"
         butl.global_var "__barg_option_${arg}_long" "${arg_long:-}"
         butl.global_var "__barg_option_${arg}_env" "${arg_env:-}"
+        butl.global_var "__barg_option_${arg}_multi" "${arg_multi:-}"
+        butl.global_var "__barg_option_${arg}_hidden" "${arg_hidden:-}"
         butl.global_array "__barg_option_${arg}_values" "${arg_values[@]}"
         butl.global_array "__barg_option_${arg}_defaults" "${arg_defaults[@]-}"
-        butl.global_var "__barg_option_${arg}_multi" "${arg_multi:-}"
         butl.global_array "__barg_option_${arg}_implies" "${arg_implies[@]-}"
-        butl.global_var "__barg_option_${arg}_hidden" "${arg_hidden:-}"
 
         __barg_options+=("$arg")
     elif [[ "$arg_short" || "$arg_long" ]]; then
@@ -2967,8 +2956,8 @@ barg.arg() {
         butl.global_var "__barg_flag_${arg}_short" "${arg_short:-}"
         butl.global_var "__barg_flag_${arg}_long" "${arg_long:-}"
         butl.global_var "__barg_flag_${arg}_env" "${arg_env:-}"
-        butl.global_array "__barg_flag_${arg}_implies" "${arg_implies[@]-}"
         butl.global_var "__barg_flag_${arg}_hidden" "${arg_hidden:-}"
+        butl.global_array "__barg_flag_${arg}_implies" "${arg_implies[@]-}"
 
         __barg_flags+=("$arg")
     else
@@ -2986,9 +2975,9 @@ barg.arg() {
 
         butl.global_var "__barg_arg_${arg}_desc" "${arg_desc:-}"
         butl.global_var "__barg_arg_${arg}_env" "${arg_env:-}"
-        butl.global_var "__barg_arg_${arg}_values" "${arg_values:-}"
-        butl.global_array "__barg_arg_${arg}_defaults" "${arg_defaults[@]-}"
         butl.global_var "__barg_arg_${arg}_hidden" "${arg_hidden:-}"
+        butl.global_array "__barg_arg_${arg}_values" "${arg_values[@]:-}"
+        butl.global_array "__barg_arg_${arg}_defaults" "${arg_defaults[@]-}"
 
         __barg_args+=("$arg")
     fi
@@ -3012,12 +3001,12 @@ barg.reset() {
 
 # Checks if there are any subcommands
 __barg_has_subcommands() {
-    if ! butl.is_array __barg_subcommands; then
+    if ! butl.is_array __barg_subcommands || ((${#__barg_subcommands[@]} == 0)); then
         return 1
     fi
 
     local count_hidden=${1:-0}
-    if ((count_hidden && ${#__barg_subcommands[@]} > 0)); then
+    if ((count_hidden)); then
         return 0
     fi
 
@@ -3036,12 +3025,12 @@ __barg_has_subcommands() {
 
 # Checks if there are any options
 __barg_has_options() {
-    if ! butl.is_array __barg_options; then
+    if ! butl.is_array __barg_options || ((${#__barg_options[@]} == 0)); then
         return 1
     fi
 
     local count_hidden=${1:-0}
-    if ((count_hidden && ${#__barg_options[@]} > 0)); then
+    if ((count_hidden)); then
         return 0
     fi
 
@@ -3060,12 +3049,12 @@ __barg_has_options() {
 
 # Checks if there are any flags
 __barg_has_flags() {
-    if ! butl.is_array __barg_flags; then
+    if ! butl.is_array __barg_flags || ((${#__barg_flags[@]} == 0)); then
         return 1
     fi
 
     local count_hidden=${1:-0}
-    if ((count_hidden && ${#__barg_flags[@]} > 0)); then
+    if ((count_hidden)); then
         return 0
     fi
 
@@ -3084,12 +3073,12 @@ __barg_has_flags() {
 
 # Checks if there are any args
 __barg_has_args() {
-    if ! butl.is_array __barg_args; then
+    if ! butl.is_array __barg_args || ((${#__barg_args[@]} == 0)); then
         return 1
     fi
 
     local count_hidden=${1:-0}
-    if ((count_hidden && ${#__barg_args[@]} > 0)); then
+    if ((count_hidden)); then
         return 0
     fi
 
@@ -3113,7 +3102,6 @@ bgen() {
     barg.subcommand run run_project "runs the project"
     barg.subcommand debug debug_project "runs the project in bash debug mode"
     barg.subcommand test run_project_tests "runs tests"
-    barg.subcommand test-debug run_project_tests_debug "outputs the project's test code"
 
     local subcommand=
     barg.parse "$@"
