@@ -260,11 +260,6 @@ __bgen_test_debug_handler() {
     local cmd=$3
     local old_=$4
 
-    # bash versions <5.1 don't seem to count the shebang in their line count
-    if ((BASH_VERSINFO[0] < 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] < 1))); then
-        line_nr=$((line_nr + 1))
-    fi
-
     if [[ ! "${__bgen_previous_rc+x}" ]]; then
         export __bgen_previous_rc=0
         export __bgen_test_prev_cmd=
