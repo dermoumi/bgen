@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#- nocov begin # change this comment
+# nocov begin # change this comment
 
-test_coverage_test() {
+_test_coverage_test() {
     # trap -p DEBUG RETURN EXIT ERR >&2
 
     local array_decl=(
