@@ -63,12 +63,28 @@ assert_exits_with() {
         esac
     done
 
+    local err=0
+
     local stderr_file
     stderr_file=$(mktemp)
 
-    local err=0
-    local stdout
-    stdout=$("${args[@]}" 2>"$stderr_file") || err=$?
+    if ((BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2 && BASH_VERSINFO[1] <= 3)); then
+        local stdout_file
+        stdout_file=$(mktemp)
+
+        # Working around bash 4.2 and 4.3 not returning the correct exit code of subprocesses
+        err=$(
+            "${args[@]}" 1>"$stdout_file" 2>"$stderr_file"
+            echo $?
+        )
+
+        local stdout
+        stdout=$(<"$stdout_file")
+        rm "$stdout_file"
+    else
+        local stdout
+        stdout=$("${args[@]}" 2>"$stderr_file") || err=$?
+    fi
 
     local stderr
     stderr=$(<"$stderr_file")

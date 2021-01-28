@@ -90,6 +90,8 @@ build_tests_to_stdout() {
     local tests_dir=
     local entrypoint_file=
     local entrypoint_func=
+    local source_dir=
+    local is_library=
     read_project_meta
 
     if ! ((${#test_files[@]})); then
@@ -111,9 +113,32 @@ build_tests_to_stdout() {
     echo_header
 
     # pre-including the project for tests to have better coverage reports
-    # if there's no entrypoint function, we assume the entrypoint file
-    # runs actual code and that can cause problems during tests
-    if [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
+    if ((is_library)); then
+        if shopt -qs extglob; then
+            local keep_extglob=1
+        fi
+
+        shopt -s extglob
+        for file in "${source_dir%/}"/**/*.sh; do
+            # If we have the same path as the query, then we got no file
+            if [[ "$file" == "${source_dir%/}/**/*.sh" ]]; then
+                break
+            fi
+
+            # ignore files that start with an underscore
+            if [[ "$file" == _* ]]; then
+                continue
+            fi
+
+            bgen_import "$file" || { check && true; }
+        done
+
+        if ! ((keep_extglob)); then
+            shopt -u extglob
+        fi
+    elif [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
+        # if there's no entrypoint function, we assume the entrypoint file
+        # runs actual code and that can cause problems during tests
         bgen_import "$entrypoint_file" || { check && true; }
     fi
 

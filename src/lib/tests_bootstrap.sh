@@ -187,12 +187,14 @@ __bgen_test_error_handler() {
     # prevent the exit_handler from outputting anything since it's also executed
     __bgen_test_error_handled=1
 
-    # print the original source file and line number for easy debugging
-    local source_file=
-    local source_line_nr=
-    __bgen_test_get_source_line "$line_nr"
-    printf '%b%s:%s (status: %s)%b\n' \
-        "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
+    if [[ "$__bgen_test_main_subshell" == "$BASH_SUBSHELL" ]]; then
+        # print the original source file and line number for easy debugging
+        local source_file=
+        local source_line_nr=
+        __bgen_test_get_source_line "$line_nr"
+        printf '%b%s:%s (status: %s)%b\n' \
+            "$__BGEN_TEST_COL_DANGER" "$source_file" "$source_line_nr" "$rc" "$__BGEN_TEST_COL_RESET" >&2
+    fi
 
     # exit with the same return code we came with
     exit "$rc"
@@ -302,7 +304,7 @@ __bgen_test_debug_handler() {
         local source_line_nr=
         local source_file=
         __bgen_test_get_source_line "$line_nr"
-        printf -- '- %s %s %-4s %-4s %s %s\n' "$__bgen_test_main_subshell" "$BASH_SUBSHELL" \
+        printf -- '%s %s %-4s %-4s %s %s\n' "$rc" "$BASH_SUBSHELL" \
             "$source_line_nr" "$line_nr" \
             "${__bgen_test_covered_lines[$line_nr]}" "$cmd" >&2
     fi
