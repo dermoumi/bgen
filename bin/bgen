@@ -714,7 +714,7 @@ build_tests_to_stdout() {
     # pre-including the project for tests to have better coverage reports
     # if there's no entrypoint function, we assume the entrypoint file
     # runs actual code and that can cause problems during tests
-    if [[ "$entrypoint_func" ]]; then
+    if [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
         bgen_import "$entrypoint_file" || { check && true; }
     fi
 
@@ -736,12 +736,55 @@ build_tests_to_stdout() {
     echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
     printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 
+    local assertlib
+# BGEN__INCLUDE_STR_BEGIN
+    read -rd '' assertlib <<-"BGEN_EOF_1435_24388" || :
+		#!/usr/bin/env bash
+		# shellcheck disable=SC2034
+		
+		assert_exits_with_code() {
+		    local expected_code="$1"
+		    shift
+		
+		    local err
+		    ("$@") || err=$?
+		
+		    if ((err == expected_code)); then
+		        return 0
+		    fi
+		
+		    echo "assert_status: expected exit_code to be $expected_code", got "${err:-0}" >&2
+		
+		    # save line at which this happened, used later for reporting
+		    __bgen_assert_line="${BASH_LINENO[0]-}"
+		
+		    return 1
+		}
+		
+		assert_eq() {
+		    local left="$1"
+		    local right="$2"
+		
+		    if [[ "$left" == "$right" ]]; then
+		        return 0
+		    fi
+		
+		    printf 'assert_eq sides do not match\nleft:\n%s\n\nright:\n%s\n' "$left" "$right" >&2
+		
+		    # save line at which this happened, used later for reporting
+		    __bgen_assert_line="${BASH_LINENO[0]-}"
+		
+		    return 1
+		}
+		export -f assert_eq
+		BGEN_EOF_1435_24388
+# BGEN__INCLUDE_STR_END
+    process_input <<<"$assertlib"
+
     local bootstrap
 # BGEN__INCLUDE_STR_BEGIN
-    read -rd '' bootstrap <<-"BGEN_EOF_1435_24388" || :
+    read -rd '' bootstrap <<-"BGEN_EOF_11074_32198" || :
 		#!/usr/bin/env bash
-		
-		bgen:import src/lib/asserts.sh
 		
 		__bgen_test_entrypoint() {
 		    local failed_tests_funcs=()
@@ -1107,7 +1150,7 @@ build_tests_to_stdout() {
 		        return
 		    fi
 		
-		    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|fi)[[:space:]]*$ ]]; then
+		    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|else|fi)[[:space:]]*$ ]]; then
 		        # line is a single curly brace or parenthesis
 		        # covered only if the previous line also covered
 		        ((${is_prev_line_covered-}))
@@ -1892,7 +1935,7 @@ build_tests_to_stdout() {
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_1435_24388
+		BGEN_EOF_11074_32198
 # BGEN__INCLUDE_STR_END
     process_input <<<"$bootstrap"
 }

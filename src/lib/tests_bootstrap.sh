@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-bgen:import src/lib/asserts.sh
-
 __bgen_test_entrypoint() {
     local failed_tests_funcs=()
     local test_reports=()
@@ -366,7 +364,7 @@ __bgen_is_line_covered() {
         return
     fi
 
-    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|fi)[[:space:]]*$ ]]; then
+    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|else|fi)[[:space:]]*$ ]]; then
         # line is a single curly brace or parenthesis
         # covered only if the previous line also covered
         ((${is_prev_line_covered-}))

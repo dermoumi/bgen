@@ -113,7 +113,7 @@ build_tests_to_stdout() {
     # pre-including the project for tests to have better coverage reports
     # if there's no entrypoint function, we assume the entrypoint file
     # runs actual code and that can cause problems during tests
-    if [[ "$entrypoint_func" ]]; then
+    if [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
         bgen_import "$entrypoint_file" || { check && true; }
     fi
 
@@ -134,6 +134,10 @@ build_tests_to_stdout() {
     echo "BGEN_COVERAGE_EXPERIMENTAL=$coverage_experimental"
     echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
     printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
+
+    local assertlib
+    bgen:include_str assertlib "lib/asserts.sh"
+    process_input <<<"$assertlib"
 
     local bootstrap
     bgen:include_str bootstrap "lib/tests_bootstrap.sh"
