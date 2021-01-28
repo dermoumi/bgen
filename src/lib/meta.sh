@@ -40,6 +40,7 @@ read_project_meta() {
         fi
 
         if [[ "$PWD" == "/" ]]; then
+            cd "$project_root" || return
             break
         fi
 
