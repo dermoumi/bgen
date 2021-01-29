@@ -366,7 +366,7 @@ __bgen_is_line_covered() {
         return
     fi
 
-    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|else|fi)[[:space:]]*$ ]]; then
+    if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|fi)[[:space:]]*$ ]]; then
         # line is a single curly brace or parenthesis
         # covered only if the previous line also covered
         ((${is_prev_line_covered-}))
@@ -377,6 +377,27 @@ __bgen_is_line_covered() {
     return 1
 }
 
+# Returns the index of the first item among the rest of the items
+# returns -1 if the item is not found
+__bgen_test_find_index_of() {
+    local target=$1
+    shift
+
+    local i=0
+    while (($#)); do
+        if [[ "$1" == "$target" ]]; then
+            index=$i
+            return 0
+        fi
+
+        i=$((i + 1))
+        shift
+    done
+
+    index=-1
+    return 1
+}
+
 # prints coverage report for a given file
 __bgen_test_add_file_report() {
     local filename=$1
@@ -384,47 +405,108 @@ __bgen_test_add_file_report() {
     local covered_lines_count=$3
     local total_lines_count=$4
 
-    local percent=$((100 * covered_lines_count / total_lines_count))
-    local filename_short=${filename/$PWD\//}
+    local index
+    if __bgen_test_find_index_of "$filename" "${cov_files[@]-}"; then
+        : "${cov_hunks[$index]}"
+        local -a "exhunks=(${_//,/ })"
 
-    if ((percent >= BGEN_COVERAGE_H_THRESHOLD)); then
-        local coverage_rating=h
-        local coverage_color=$__BGEN_TEST_COL_SUCCESS
-    elif ((percent >= BGEN_COVERAGE_M_THRESHOLD)); then
-        local coverage_rating=m
-        local coverage_color=$__BGEN_TEST_COL_WARNING
+        for hunk in ${covered_hunks//,/ }; do
+            local newhunks=()
+            local covered_lines_count=0
+
+            if [[ "$hunk" == *-* ]]; then
+                local start=${hunk%-*}
+                local end=${hunk#*-}
+            else
+                local start=$hunk
+                local end=$hunk
+            fi
+
+            local placed=0
+            local i=0
+            while ((i < ${#exhunks[@]})); do
+                local ihunk=${exhunks[$i]}
+
+                if [[ "$ihunk" == *-* ]]; then
+                    local istart=${ihunk%-*}
+                    local iend=${ihunk#*-}
+                else
+                    local istart=$ihunk
+                    local iend=$ihunk
+                fi
+
+                if ((placed == 0 && end + 1 < istart)); then
+                    if ((start == end)); then
+                        newhunks+=("$start")
+                        covered_lines_count=$((covered_lines_count + 1))
+                    else
+                        newhunks+=("$start-$end")
+                        covered_lines_count=$((covered_lines_count - start + end + 1))
+                    fi
+
+                    local j=$i
+                    while ((j < ${#exhunks[@]})); do
+                        local jhunk=${exhunks[$j]}
+
+                        if [[ "$jhunk" == *-* ]]; then
+                            local jstart=${jhunk%-*}
+                            local jend=${jhunk#*-}
+                            covered_lines_count=$((covered_lines_count - jstart + jend + 1))
+                        else
+                            covered_lines_count=$((covered_lines_count + 1))
+                        fi
+
+                        j=$((j + 1))
+                    done
+                    newhunks+=("${exhunks[@]:$i}")
+
+                    placed=1
+                    break
+                fi
+
+                if ((start >= istart && end <= iend)); then
+                    start=$istart
+                    end=$iend
+                elif ((start <= istart && end >= iend)); then
+                    :
+                elif ((end + 1 >= istart && end <= iend)); then
+                    end=$iend
+                elif ((start <= iend + 1 && start >= istart)); then
+                    start=$istart
+                else
+                    newhunks+=("$ihunk")
+                    covered_lines_count=$((covered_lines_count - istart + iend + 1))
+                fi
+
+                i=$((i + 1))
+            done
+
+            if ((placed == 0)); then
+                if ((start == end)); then
+                    newhunks+=("$start")
+                    covered_lines_count=$((covered_lines_count + 1))
+                else
+                    newhunks+=("$start-$end")
+                    covered_lines_count=$((covered_lines_count - start + end + 1))
+                fi
+            fi
+
+            exhunks=("${newhunks[@]}")
+
+            if ((placed)); then
+                break
+            fi
+        done
+
+        : "$(printf ',%s' "${newhunks[@]}")"
+        cov_hunks[$index]=${_:1}
+        cov_lines[$index]=${covered_lines_count}
     else
-        local coverage_rating=l
-        local coverage_color=$__BGEN_TEST_COL_DANGER
+        cov_files+=("$filename")
+        cov_hunks+=("$covered_hunks")
+        cov_lines+=("$covered_lines_count")
+        cov_file_lines+=("$total_lines_count")
     fi
-
-    if [[ "$BGEN_HTML_REPORT_FILE" ]]; then
-        local file_id=${filename_short//[![:alnum:]-_]/_}
-
-        : "$(<"$filename")"
-        : "${_//</&lt;}"
-        local code=${_//>/&gt;}
-
-        : "${__BGEN_COVERAGE_HTML_FILE//__COVERAGE_FILE_NAME__/$filename_short}"
-        : "${_//__COVERAGE_FILE_ID__/$file_id}"
-        : "${_//__COVERAGE_FILE_COVERED__/$covered_lines_count}"
-        : "${_//__COVERAGE_FILE_LINES__/$total_lines_count}"
-        : "${_//__COVERAGE_FILE_PERCENT__/$percent}"
-        : "${_//__COVERAGE_FILE_RATING__/$coverage_rating}"
-        : "${_//__COVERAGE_FILE_HUNKS__/$covered_hunks}"
-        local html="${_//__COVERAGE_FILE_CODE__/$code}"
-
-        html_report+=$html
-    fi
-
-    local report_line
-    report_line="$(
-        printf '%s %b(%s/%s)\t%b%3s%%%b' "$filename_short" \
-            "$__BGEN_TEST_COL_TRIVIAL" "$covered_lines_count" \
-            "$total_lines_count" "$coverage_color" "$percent" "$__BGEN_TEST_COL_RESET"
-    )"
-
-    coverage_report+=("$report_line")
 }
 
 __bgen_test_reverse_lines() {
@@ -745,6 +827,12 @@ __bgen_test_parse_coverage_map() {
             continue
         fi
 
+        # lines that only contain 'else' depend on the next line to be covered
+        if [[ "$line" == "else" ]]; then
+            pending_lines=$((pending_lines + 1))
+            continue
+        fi
+
         if [[ "$current_file" ]]; then
             if __bgen_is_line_covered "$line_nr" "$line"; then
                 __bgen_test_extend_coverage_hunk
@@ -765,6 +853,11 @@ __bgen_test_make_coverage_report() {
     local html_report=
     local coverage_report=()
 
+    local cov_files=()
+    local cov_hunks=()
+    local cov_lines=()
+    local cov_file_lines=()
+
     local total_covered=0
     local total_lines=0
 
@@ -774,7 +867,64 @@ __bgen_test_make_coverage_report() {
     __bgen_test_normalize_trails_map
     __bgen_test_parse_coverage_map <<<"$__BGEN_TEST_SOURCE"
 
-    if ((total_lines == 0)); then
+    if ((${#cov_files[@]})); then
+        total_covered=0
+        total_lines=0
+
+        local i=0
+        while ((i < ${#cov_files[@]})); do
+            local filename=${cov_files[$i]}
+            local hunks=${cov_hunks[$i]}
+            local covered_lines_count=${cov_lines[$i]}
+            local total_lines_count=${cov_file_lines[$i]}
+
+            local percent=$((100 * covered_lines_count / total_lines_count))
+            local filename_short=${filename/$PWD\//}
+
+            if ((percent >= BGEN_COVERAGE_H_THRESHOLD)); then
+                local coverage_rating=h
+                local coverage_color=$__BGEN_TEST_COL_SUCCESS
+            elif ((percent >= BGEN_COVERAGE_M_THRESHOLD)); then
+                local coverage_rating=m
+                local coverage_color=$__BGEN_TEST_COL_WARNING
+            else
+                local coverage_rating=l
+                local coverage_color=$__BGEN_TEST_COL_DANGER
+            fi
+
+            if [[ "$BGEN_HTML_REPORT_FILE" ]]; then
+                local file_id=${filename_short//[![:alnum:]-_]/_}
+
+                : "$(<"$filename")"
+                : "${_//</&lt;}"
+                local code=${_//>/&gt;}
+
+                : "${__BGEN_COVERAGE_HTML_FILE//__COVERAGE_FILE_NAME__/$filename_short}"
+                : "${_//__COVERAGE_FILE_ID__/$file_id}"
+                : "${_//__COVERAGE_FILE_COVERED__/$covered_lines_count}"
+                : "${_//__COVERAGE_FILE_LINES__/$total_lines_count}"
+                : "${_//__COVERAGE_FILE_PERCENT__/$percent}"
+                : "${_//__COVERAGE_FILE_RATING__/$coverage_rating}"
+                : "${_//__COVERAGE_FILE_HUNKS__/$hunks}"
+                local html="${_//__COVERAGE_FILE_CODE__/$code}"
+
+                html_report+=$html
+            fi
+
+            local report_line
+            report_line="$(
+                printf '%s %b(%s/%s)\t%b%3s%%%b' "$filename_short" \
+                    "$__BGEN_TEST_COL_TRIVIAL" "$covered_lines_count" \
+                    "$total_lines_count" "$coverage_color" "$percent" "$__BGEN_TEST_COL_RESET"
+            )"
+
+            coverage_report+=("$report_line")
+
+            total_covered=$((total_covered + covered_lines_count))
+            total_lines=$((total_lines + total_lines_count))
+            i=$((i + 1))
+        done
+    else
         echo "    Nothing to cover :/"
         return
     fi
