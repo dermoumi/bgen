@@ -75,7 +75,7 @@ echo_entrypoint_call() {
 
     if [[ "$entrypoint_func" ]]; then
         # shellcheck disable=SC2016
-        printf '\n[[ "$__main__" ]] && %s "$@"\n' "$entrypoint_func"
+        printf '\n[[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]] || %s "$@"\n' "$entrypoint_func"
     fi
 }
 

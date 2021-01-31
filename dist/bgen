@@ -1,36 +1,6 @@
 #!/usr/bin/env bash
 
-set -o errexit
-set -o errtrace
-set -o pipefail
-set -o nounset
-if [[ "${__BGEN_PIPE_SOURCE__:-}" ]];then
-__process__="$__BGEN_PIPE_SOURCE__"
-elif [[ "${BASH_SOURCE+x}" ]];then
-__process__="${BASH_SOURCE[0]}"
-else
-__process__="$0"
-fi
-if [[ ${BASH_SOURCE+x} && ${BASH_SOURCE[0]} != "$0" ]];then
-__main__=
-if [[ "${__usage__+x}" ]];then
-if [[ ${BASH_SOURCE[1]} == "$0" ]];then
-__main__=1
-fi
-__process__="${BASH_SOURCE[1]}"
-fi
-else
-__main__=1
-[[ "${__usage__+x}" ]]&&unset -v __usage__
-fi
-__dir__="$(cd "$(dirname "$__process__")"&&pwd)"
-__file__="$__dir__/$(basename "$__process__")"
-__base__="$(basename "$__file__" .sh)"
-if [[ "${__BGEN_PIPE_SOURCE__:-}" ]];then
-__invocation__="$__BGEN_PIPE_SOURCE__"
-else
-__invocation__="$(printf %q "$__file__")"
-fi
+set -o errexit -o errtrace -o pipefail -o nounset
 LOG_LEVEL="${LOG_LEVEL:-6}"
 NO_COLOR="${NO_COLOR:-}"
 bail(){
@@ -233,64 +203,14 @@ if [[ -f $header_file ]];then
 process_file "$header_file"
 else
 local default_header
-read -rd '' default_header <<-"BGEN_EOF_26353_27010"||:
+read -rd '' default_header <<-"BGEN_EOF_23432_19018"||:
 			#!/usr/bin/env bash
 			
-			# Exit on error. Append "|| true" if you expect an error.
-			set -o errexit
-			# Exit on error inside any functions or subshells.
-			set -o errtrace
-			# Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
-			set -o pipefail
-			# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
-			set -o nounset
+			set -o errexit -o errtrace -o pipefail -o nounset
 			
-			# TODO: use nounset only on bash 4.4+? earlier versions also complain when expanding empty arrays
-			# if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
-			# set -o nounset
-			# fi
-			
-			# check whether script is source or directly executed
-			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
-			    __process__="$__BGEN_PIPE_SOURCE__"
-			elif [[ "${BASH_SOURCE+x}" ]]; then
-			    __process__="${BASH_SOURCE[0]}"
-			else
-			    __process__="$0"
-			fi
-			
-			if [[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]]; then
-			    __main__= # false
-			    # shellcheck disable=SC2154
-			    if [[ "${__usage__+x}" ]]; then
-			        if [[ "${BASH_SOURCE[1]}" = "${0}" ]]; then
-			            __main__=1 # true
-			        fi
-			
-			        __process__="${BASH_SOURCE[1]}"
-			    fi
-			else
-			    # shellcheck disable=SC2034
-			    __main__=1 # true
-			    [[ "${__usage__+x}" ]] && unset -v __usage__
-			fi
-			
-			# Set magic variables for current file, directory, os, etc.
-			__dir__="$(cd "$(dirname "${__process__}")" && pwd)"
-			__file__="${__dir__}/$(basename "${__process__}")"
-			# shellcheck disable=SC2034,SC2015
-			__base__="$(basename "${__file__}" .sh)"
-			# shellcheck disable=SC2034,SC2015
-			if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
-			    __invocation__="${__BGEN_PIPE_SOURCE__}"
-			else
-			    __invocation__="$(printf %q "${__file__}")"
-			fi
-			
-			# Define the environment variables (and their defaults) that this script depends on
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
-			NO_COLOR="${NO_COLOR:-}"    # true = disable color. otherwise autodetected
-			BGEN_EOF_26353_27010
+			NO_COLOR="${NO_COLOR:-}"
+			BGEN_EOF_23432_19018
 process_input <<<"$default_header"
 fi
 printf '\n\n'
@@ -333,7 +253,7 @@ done
 echo_entrypoint_call(){
 local entrypoint_func=${entrypoint_func:-}
 if [[ "$entrypoint_func" ]];then
-printf '\n[[ "$__main__" ]] && %s "$@"\n' "$entrypoint_func"
+printf '\n[[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]] || %s "$@"\n' "$entrypoint_func"
 fi
 }
 process_shebang(){
@@ -970,7 +890,18 @@ if [[ "$subcommand_name" ]];then
 barg.print_subcommand_usage "$subcommand_name"
 return
 fi
-local process_base=${__base__:-$0}
+local process process_dir process_file process_base
+if [[ "${__BGEN_PIPE_SOURCE__:-}" ]];then
+process="$__BGEN_PIPE_SOURCE__"
+elif [[ "${BASH_SOURCE+x}" ]];then
+process="${BASH_SOURCE[0]}"
+else
+process="$0"
+fi
+process_dir="$(cd "$(dirname "$process")"&&pwd)"
+process_file="$process_dir/$(basename "$process")"
+process_base="$(basename "$process_file" .sh)"
+local process_base=${process_base:-$0}
 local arg_list=()
 local section_break=
 if ((${#__barg_subcommands[@]}));then
@@ -1708,7 +1639,7 @@ echo "BGEN_COVERAGE_EXPERIMENTAL=$coverage_experimental"
 echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
 printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 local assertlib
-read -rd '' assertlib <<-"BGEN_EOF_5082_13130"||:
+read -rd '' assertlib <<-"BGEN_EOF_17295_22091"||:
 		#!/usr/bin/env bash
 		# shellcheck disable=SC2034
 		
@@ -1843,10 +1774,10 @@ read -rd '' assertlib <<-"BGEN_EOF_5082_13130"||:
 		    return 0
 		}
 		export -f assert_exits_with
-		BGEN_EOF_5082_13130
+		BGEN_EOF_17295_22091
 process_input <<<"$assertlib"
 local bootstrap
-read -rd '' bootstrap <<-"BGEN_EOF_5939_15237"||:
+read -rd '' bootstrap <<-"BGEN_EOF_16111_21757"||:
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -3164,7 +3095,7 @@ read -rd '' bootstrap <<-"BGEN_EOF_5939_15237"||:
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_5939_15237
+		BGEN_EOF_16111_21757
 process_input <<<"$bootstrap"
 }
 bgen(){
@@ -3175,4 +3106,4 @@ local subcommand=
 barg.parse "$@"
 "${subcommand[@]}"
 }
-[[ "$__main__" ]]&&bgen "$@"
+[[ ${BASH_SOURCE+x} && ${BASH_SOURCE[0]} != "$0" ]]||bgen "$@"
