@@ -203,14 +203,14 @@ if [[ -f $header_file ]];then
 process_file "$header_file"
 else
 local default_header
-read -rd '' default_header <<-"BGEN_EOF_14159_20440"||:
+read -rd '' default_header <<-"BGEN_EOF_17772_26794"||:
 			#!/usr/bin/env bash
 			
 			set -o errexit -o errtrace -o pipefail -o nounset
 			
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"
-			BGEN_EOF_14159_20440
+			BGEN_EOF_17772_26794
 process_input <<<"$default_header"
 fi
 printf '\n\n'
@@ -1387,7 +1387,6 @@ if ((minify))&&! command -v shfmt >/dev/null 2>/dev/null;then
 butl.log_warning "shfmt command not found, minifying will be disabled"
 minify=0
 fi
-export RANDOM=42
 local imported_files=()
 local header_file=
 local entrypoint_func=
@@ -1410,6 +1409,7 @@ fi
 }
 build_library_file(){
 local file="$1"
+RANDOM=42
 echo_shebang
 if ((minify));then
 process_file "$file"|shfmt -mn
@@ -1456,7 +1456,8 @@ build_file(){
 local entrypoint=$1
 echo_shebang
 local output
-output=$(echo_header
+output=$(RANDOM=42
+echo_header
 process_file "$entrypoint"
 echo_entrypoint_call)
 if ((minify));then
@@ -1502,7 +1503,7 @@ export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
 bash -x -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }
 command_test(){
-barg.arg test_files \
+barg.arg targets \
 --multi \
 --value=FILE \
 --desc="Test script files or directories to run."
@@ -1545,7 +1546,7 @@ barg.arg print_source \
 --short=p \
 --long=print-source \
 --desc "Print test script's source code instead of executing it."
-local test_files=()
+local targets=()
 local test_funcs=()
 local no_capture=
 local coverage=
@@ -1554,7 +1555,19 @@ local coverage_debug=
 local coverage_file=
 local print_source=
 barg.parse "$@"
-export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
+local process process_dir process_file process_base
+if [[ "${__BGEN_PIPE_SOURCE__:-}" ]];then
+process="$__BGEN_PIPE_SOURCE__"
+elif [[ "${BASH_SOURCE+x}" ]];then
+process="${BASH_SOURCE[0]}"
+else
+process="$0"
+fi
+process_dir="$(cd "$(dirname "$process")"&&pwd)"
+process_file="$process_dir/$(basename "$process")"
+process_base="$(basename "$process_file" .sh)"
+local process_base=${process_base:-$0}
+export __BGEN_PIPE_SOURCE__="$process_base test"
 local script_file
 script_file=$(mktemp)
 trap "rm -rf '$script_file'" EXIT
@@ -1577,17 +1590,23 @@ local entrypoint_func=
 local source_dir=
 local is_library=
 read_project_meta
-if ! ((${#test_files[@]}));then
+local test_files=()
+if ! ((${#targets[@]}));then
 if ! [[ -d $tests_dir ]];then
-echo "tests directory '$tests_dir' does not exist" >&2
-return 1
+butl.fail "tests directory '$tests_dir' does not exist"
+return
 fi
-for file in "$tests_dir"/*;do
-if [[ ${file##*/} != "_"* ]];then
-test_files+=("$file")
+collect_testfiles_in_dir "$tests_dir"
+else
+for target in "${targets[@]}";do
+if [[ -d $target ]];then
+collect_testfiles_in_dir "$target"
+else
+test_files+=("$target")
 fi
 done
 fi
+echo_shebang
 echo_header
 if ((is_library));then
 if shopt -qs extglob;then
@@ -1639,7 +1658,7 @@ echo "BGEN_COVERAGE_EXPERIMENTAL=$coverage_experimental"
 echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
 printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 local assertlib
-read -rd '' assertlib <<-"BGEN_EOF_7192_18625"||:
+read -rd '' assertlib <<-"BGEN_EOF_1435_24388"||:
 		#!/usr/bin/env bash
 		# shellcheck disable=SC2034
 		
@@ -1774,10 +1793,10 @@ read -rd '' assertlib <<-"BGEN_EOF_7192_18625"||:
 		    return 0
 		}
 		export -f assert_exits_with
-		BGEN_EOF_7192_18625
+		BGEN_EOF_1435_24388
 process_input <<<"$assertlib"
 local bootstrap
-read -rd '' bootstrap <<-"BGEN_EOF_12662_5886"||:
+read -rd '' bootstrap <<-"BGEN_EOF_11074_32198"||:
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -3095,8 +3114,16 @@ read -rd '' bootstrap <<-"BGEN_EOF_12662_5886"||:
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_12662_5886
+		BGEN_EOF_11074_32198
 process_input <<<"$bootstrap"
+}
+collect_testfiles_in_dir(){
+local dir=$1
+for file in "$dir"/*;do
+if [[ ${file##*/} != "_"* ]];then
+test_files+=("$file")
+fi
+done
 }
 bgen(){
 barg.subcommand build command_build "builds the project"

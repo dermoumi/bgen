@@ -4,7 +4,7 @@ bgen:import lib/meta
 bgen:import lib/build
 
 command_test() {
-    barg.arg test_files \
+    barg.arg targets \
         --multi \
         --value=FILE \
         --desc="Test script files or directories to run."
@@ -48,7 +48,7 @@ command_test() {
         --long=print-source \
         --desc "Print test script's source code instead of executing it."
 
-    local test_files=()
+    local targets=()
     local test_funcs=()
     local no_capture=
     local coverage=
@@ -58,7 +58,24 @@ command_test() {
     local print_source=
     barg.parse "$@"
 
-    export __BGEN_PIPE_SOURCE__="${__base__:-$0} test"
+    # check whether bgen is sourced or directly executed
+    local process process_dir process_file process_base
+    if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
+        process="$__BGEN_PIPE_SOURCE__"
+    elif [[ "${BASH_SOURCE+x}" ]]; then
+        process="${BASH_SOURCE[0]}"
+    else
+        process="$0"
+    fi
+
+    # Set magic variables for current file, directory, os, etc.
+    process_dir="$(cd "$(dirname "${process}")" && pwd)"
+    process_file="${process_dir}/$(basename "${process}")"
+    # shellcheck disable=SC2034,SC2015
+    process_base="$(basename "${process_file}" .sh)"
+
+    local process_base=${process_base:-$0}
+    export __BGEN_PIPE_SOURCE__="$process_base test"
 
     local script_file
     script_file=$(mktemp)
@@ -95,22 +112,27 @@ build_tests_to_stdout() {
     local is_library=
     read_project_meta
 
-    if ! ((${#test_files[@]})); then
+    local test_files=()
+    if ! ((${#targets[@]})); then
         # make sure tests directory exists
         if ! [[ -d "$tests_dir" ]]; then
-            echo "tests directory '$tests_dir' does not exist" >&2
-            return 1
+            butl.fail "tests directory '$tests_dir' does not exist"
+            return
         fi
 
-        for file in "$tests_dir"/*; do
-            # ${file##*/} keeps only what's after the last slash (aka the basename)
-            if [[ "${file##*/}" != "_"* ]]; then
-                test_files+=("$file")
+        collect_testfiles_in_dir "$tests_dir"
+    else
+        for target in "${targets[@]}"; do
+            if [[ -d "$target" ]]; then
+                collect_testfiles_in_dir "$target"
+            else
+                test_files+=("$target")
             fi
         done
     fi
 
     # build the tests file
+    echo_shebang
     echo_header
 
     # pre-including the project for tests to have better coverage reports
@@ -184,4 +206,15 @@ build_tests_to_stdout() {
     local bootstrap
     bgen:include_str bootstrap "lib/tests_bootstrap.sh"
     process_input <<<"$bootstrap"
+}
+
+collect_testfiles_in_dir() {
+    local dir=$1
+
+    for file in "$dir"/*; do
+        # ${file##*/} keeps only what's after the last slash (aka the basename)
+        if [[ "${file##*/}" != "_"* ]]; then
+            test_files+=("$file")
+        fi
+    done
 }
