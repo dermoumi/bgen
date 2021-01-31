@@ -16,7 +16,27 @@ command_run() {
     local args=()
     barg.parse "$@"
 
-    if ((debug)); then
+    # used later to keep track of whether a file was imported or not
+    # declared here to be on the biggest private scope it's needed in
+    # shellcheck disable=2034
+    local imported_files=()
+
+    # shellcheck disable=2034
+    local header_file=
+    # shellcheck disable=2034
+    local entrypoint_func=
+    # shellcheck disable=2034
+    local shebang_string=
+    # shellcheck disable=2034
+    local import_paths=
+    # shellcheck disable=2034
+    local entrypoint_file=
+    local is_library=
+    read_project_meta
+
+    if ((is_library)); then
+        butl.die "You cannot run library projects."
+    elif ((debug)); then
         debug_project "${args[@]}"
     else
         run_project "${args[@]}"
@@ -25,10 +45,10 @@ command_run() {
 
 run_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} run"
-    bash -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+    bash -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }
 
 debug_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
-    bash -x -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+    bash -x -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }

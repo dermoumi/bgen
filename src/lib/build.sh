@@ -6,8 +6,9 @@ bgen:import butl/arrays
 echo_header() {
     local header_file=${header_file:-}
     if [[ -f "$header_file" ]]; then
-        local shebang_string=${shebang_string:-}
-        printf '%s\n\n' "$shebang_string"
+        if [[ "${shebang_string:-}" ]]; then
+            printf '%s\n\n' "$shebang_string"
+        fi
 
         process_file "$header_file"
     else
@@ -37,12 +38,24 @@ process_file() {
 process_input() {
     local found_first_line=
     while IFS= read -r line; do
+        local err=0
+
         # Process source directives that point ot static files
-        process_directive "$line" || { check && continue; }
+        process_directive "$line" || err=$?
+        if ((err == 200)); then
+            continue
+        elif ((err)); then
+            return $err
+        fi
 
         # Remove first shebang in the file
         if ! [[ "$found_first_line" ]]; then
-            process_shebang "$line" || { check && continue; }
+            process_shebang "$line" || err=$?
+            if ((err == 200)); then
+                continue
+            elif ((err)); then
+                return $err
+            fi
         fi
 
         if [[ ! "$found_first_line" ]]; then
@@ -65,20 +78,6 @@ echo_entrypoint_call() {
     fi
 }
 
-check() {
-    local ret=$?
-
-    if [[ "$ret" == 200 ]]; then
-        return 0
-    fi
-
-    if [[ "$ret" ]] && ((ret != 0 && ret != 200)); then
-        exit "$ret"
-    fi
-
-    return 1
-}
-
 process_shebang() {
     local line
     line=$(trim_str "$1")
@@ -92,7 +91,6 @@ process_shebang() {
 
 process_directive() {
     local line=$1
-
     if ! [[ "$line" =~ ^[[:space:]]*bgen\: ]]; then
         return 0
     fi
@@ -105,9 +103,9 @@ process_directive() {
     : "${_//\$/\\\$}"
     : "${_//\(/\\\(}"
     : "${_//\)/\\/)}"
+    declare -a "args=( $_ )"
 
     # parse arguments
-    declare -a "args=( $_ )"
     if (("${#args[@]}" == 0)); then
         return 0
     fi
@@ -119,7 +117,7 @@ process_directive() {
     "bgen:import") bgen_import "${args[@]}" ;;
     "bgen:include") bgen_include "${args[@]}" ;;
     "bgen:include_str") bgen_include_str "${args[@]}" ;;
-    "bgen:"*) bail "unknown bgen directive: $directive" ;;
+    "bgen:"*) butl.fail "unknown bgen directive: $directive" ;;
     *) ;;
     esac
 }
@@ -128,7 +126,7 @@ find_file() {
     local file=$1
 
     # check if the file exists
-    if [[ -r "$file" ]]; then
+    if [[ -r "$file" && -f "$file" ]]; then
         realpath "$file"
         return
     fi
@@ -142,7 +140,7 @@ find_file() {
                 dir="${project_root:-$PWD}/$dir"
             fi
 
-            if [[ -r "$dir/$file" ]]; then
+            if [[ -r "$dir/$file" && -f "$dir/$file" ]]; then
                 realpath "$dir/$file"
                 return
             fi

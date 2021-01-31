@@ -55,7 +55,7 @@ MYDOC
             true "$i"
         done
         # test comment
-        : 42 bail "this is a test message" 42 2>&1
+        : 42 butl.fail "this is a test message" 42 2>&1
     )
 
     local output
@@ -64,7 +64,7 @@ MYDOC
             true "$i"
         done
         : 42 \
-            bail "this is a test message" 42 \
+            butl.fail "this is a test message" 42 \
             2>&1
     )
 
@@ -73,7 +73,8 @@ MYDOC
         for i in {0..2}; do
             true "$i"
         done
-        assert_exits_with_code 42 bail "this is a test message" 42 2>&1
+        assert_exits_with --code=42 \
+            butl.fail "this is a test message" 42
         return
         echo henlo
     )
@@ -83,9 +84,8 @@ MYDOC
         for i in {0..2}; do
             true "$i"
         done
-        assert_exits_with_code 42 \
-            bail "this is a test message" 42 \
-            2>&1
+        assert_exits_with --code=42 \
+            build.fail "this is a test message"
         return
         echo henlo
     )

@@ -131,7 +131,15 @@ build_tests_to_stdout() {
                 continue
             fi
 
-            bgen_import "$file" || { check && true; }
+            local err=0
+            bgen_import "$file" || err=$?
+            if ((err != 200)); then
+                if ! ((keep_extglob)); then
+                    shopt -u extglob
+                fi
+
+                return $err
+            fi
         done
 
         if ! ((keep_extglob)); then
@@ -140,13 +148,21 @@ build_tests_to_stdout() {
     elif [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
         # if there's no entrypoint function, we assume the entrypoint file
         # runs actual code and that can cause problems during tests
-        bgen_import "$entrypoint_file" || { check && true; }
+        local err=0
+        bgen_import "$entrypoint_file" || err=$?
+        if ((err != 200)); then
+            return $err
+        fi
     fi
 
     for test_file in "${test_files[@]}"; do
         [[ -f "$test_file" ]] || continue
 
-        bgen_import "$test_file" || { check && true; }
+        local err=0
+        bgen_import "$test_file" || err=$?
+        if ((err != 200)); then
+            return $err
+        fi
     done
 
     if ((${#test_funcs[@]})); then

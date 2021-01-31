@@ -364,8 +364,9 @@ butl.split_lines() {
 echo_header() {
     local header_file=${header_file:-}
     if [[ -f "$header_file" ]]; then
-        local shebang_string=${shebang_string:-}
-        printf '%s\n\n' "$shebang_string"
+        if [[ "${shebang_string:-}" ]]; then
+            printf '%s\n\n' "$shebang_string"
+        fi
 
         process_file "$header_file"
     else
@@ -454,12 +455,24 @@ process_file() {
 process_input() {
     local found_first_line=
     while IFS= read -r line; do
+        local err=0
+
         # Process source directives that point ot static files
-        process_directive "$line" || { check && continue; }
+        process_directive "$line" || err=$?
+        if ((err == 200)); then
+            continue
+        elif ((err)); then
+            return $err
+        fi
 
         # Remove first shebang in the file
         if ! [[ "$found_first_line" ]]; then
-            process_shebang "$line" || { check && continue; }
+            process_shebang "$line" || err=$?
+            if ((err == 200)); then
+                continue
+            elif ((err)); then
+                return $err
+            fi
         fi
 
         if [[ ! "$found_first_line" ]]; then
@@ -482,20 +495,6 @@ echo_entrypoint_call() {
     fi
 }
 
-check() {
-    local ret=$?
-
-    if [[ "$ret" == 200 ]]; then
-        return 0
-    fi
-
-    if [[ "$ret" ]] && ((ret != 0 && ret != 200)); then
-        exit "$ret"
-    fi
-
-    return 1
-}
-
 process_shebang() {
     local line
     line=$(trim_str "$1")
@@ -509,7 +508,6 @@ process_shebang() {
 
 process_directive() {
     local line=$1
-
     if ! [[ "$line" =~ ^[[:space:]]*bgen\: ]]; then
         return 0
     fi
@@ -522,9 +520,9 @@ process_directive() {
     : "${_//\$/\\\$}"
     : "${_//\(/\\\(}"
     : "${_//\)/\\/)}"
+    declare -a "args=( $_ )"
 
     # parse arguments
-    declare -a "args=( $_ )"
     if (("${#args[@]}" == 0)); then
         return 0
     fi
@@ -536,7 +534,7 @@ process_directive() {
     "bgen:import") bgen_import "${args[@]}" ;;
     "bgen:include") bgen_include "${args[@]}" ;;
     "bgen:include_str") bgen_include_str "${args[@]}" ;;
-    "bgen:"*) bail "unknown bgen directive: $directive" ;;
+    "bgen:"*) butl.fail "unknown bgen directive: $directive" ;;
     *) ;;
     esac
 }
@@ -545,7 +543,7 @@ find_file() {
     local file=$1
 
     # check if the file exists
-    if [[ -r "$file" ]]; then
+    if [[ -r "$file" && -f "$file" ]]; then
         realpath "$file"
         return
     fi
@@ -559,7 +557,7 @@ find_file() {
                 dir="${project_root:-$PWD}/$dir"
             fi
 
-            if [[ -r "$dir/$file" ]]; then
+            if [[ -r "$dir/$file" && -f "$dir/$file" ]]; then
                 realpath "$dir/$file"
                 return
             fi
@@ -2014,15 +2012,78 @@ command_build() {
     barg.arg print_source \
         --short=p \
         --long=print-source \
-        --desc "Print test script's source code instead of executing it"
+        --desc "Print test script's source code instead of executing it."
 
     local print_source=
     barg.parse "$@"
 
-    if ((print_source)); then
-        build_project_to_stdout
+    # set a constant seed to have consistent builds
+    RANDOM=42
+
+    # used later to keep track of whether a file was imported or not
+    # declared here to be on the biggest private scope it's needed in
+    # shellcheck disable=2034
+    local imported_files=()
+
+    # shellcheck disable=2034
+    local header_file=
+    # shellcheck disable=2034
+    local entrypoint_func=
+    # shellcheck disable=2034
+    local shebang_string=
+    # shellcheck disable=2034
+    local import_paths=
+    local entrypoint_file=
+    local is_library=
+    local source_dir=
+    local output_dir=
+    read_project_meta
+
+    if ((is_library)); then
+        build_library
     else
-        build_project
+        if ((print_source)); then
+            build_project_to_stdout
+        else
+            build_project
+        fi
+    fi
+}
+
+build_library_file() {
+    local file="$1"
+
+    if [[ "${shebang_string:-}" ]]; then
+        printf '%s\n\n' "$shebang_string"
+    fi
+    process_file "$file"
+}
+
+build_library() {
+    if shopt -qs extglob; then
+        local keep_extglob=1
+    fi
+
+    shopt -s extglob
+    for file in "${source_dir%/}"/**/*.sh; do
+        # If we have the same path as the query, then we got no file
+        if [[ "$file" == "${source_dir%/}/**/*.sh" ]]; then
+            break
+        fi
+
+        # ignore files that start with an underscore
+        if [[ "$file" == _* ]]; then
+            continue
+        fi
+
+        local output_file="${output_dir%/}/${file%%$source_dir}"
+        mkdir -p "${output_file%/*}"
+
+        build_library_file "$file" >"$output_file"
+    done
+
+    if ! ((keep_extglob)); then
+        shopt -u extglob
     fi
 }
 
@@ -2034,7 +2095,7 @@ build_project() {
     trap "rm '$tmp_file' >/dev/null || true" exit
 
     # build the project
-    build_project_to_stdout >"$tmp_file"
+    build_file "$entrypoint_file" >"$tmp_file"
 
     # shellcheck disable=SC1007
     local output_file=""
@@ -2054,31 +2115,11 @@ build_project() {
     chmod +x "$output_file"
 }
 
-build_project_to_stdout() {
-    # set a constant seed to have consistent builds
-    RANDOM=42
+build_file() {
+    local entrypoint=$1
 
-    # used later to keep track of whether a file was imported or not
-    # declared here to be on the biggest private scope it's needed in
-    # shellcheck disable=2034
-    local imported_files=()
-
-    # shellcheck disable=2034
-    local project_root=
-    # shellcheck disable=2034
-    local header_file=
-    # shellcheck disable=2034
-    local entrypoint_func=
-    # shellcheck disable=2034
-    local shebang_string=
-    # shellcheck disable=2034
-    local import_paths=
-    local entrypoint_file=
-    read_project_meta
-
-    # build the project
     echo_header
-    process_file "$entrypoint_file"
+    process_file "$entrypoint"
     echo_entrypoint_call
 }
 # BGEN__END /home/sdrm/projects/bgen/src/build.sh
@@ -2101,7 +2142,27 @@ command_run() {
     local args=()
     barg.parse "$@"
 
-    if ((debug)); then
+    # used later to keep track of whether a file was imported or not
+    # declared here to be on the biggest private scope it's needed in
+    # shellcheck disable=2034
+    local imported_files=()
+
+    # shellcheck disable=2034
+    local header_file=
+    # shellcheck disable=2034
+    local entrypoint_func=
+    # shellcheck disable=2034
+    local shebang_string=
+    # shellcheck disable=2034
+    local import_paths=
+    # shellcheck disable=2034
+    local entrypoint_file=
+    local is_library=
+    read_project_meta
+
+    if ((is_library)); then
+        butl.die "You cannot run library projects."
+    elif ((debug)); then
         debug_project "${args[@]}"
     else
         run_project "${args[@]}"
@@ -2110,12 +2171,12 @@ command_run() {
 
 run_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} run"
-    bash -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+    bash -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }
 
 debug_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
-    bash -x -c "$(build_project_to_stdout)" "${__base__:-$0} run" "$@"
+    bash -x -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }
 # BGEN__END /home/sdrm/projects/bgen/src/run.sh
 # BGEN__BEGIN /home/sdrm/projects/bgen/src/tests.sh
@@ -2167,7 +2228,7 @@ command_test() {
     barg.arg print_source \
         --short=p \
         --long=print-source \
-        --desc "Print test script's source code instead of executing it"
+        --desc "Print test script's source code instead of executing it."
 
     local test_files=()
     local test_funcs=()
@@ -2252,7 +2313,15 @@ build_tests_to_stdout() {
                 continue
             fi
 
-            bgen_import "$file" || { check && true; }
+            local err=0
+            bgen_import "$file" || err=$?
+            if ((err != 200)); then
+                if ! ((keep_extglob)); then
+                    shopt -u extglob
+                fi
+
+                return $err
+            fi
         done
 
         if ! ((keep_extglob)); then
@@ -2261,13 +2330,21 @@ build_tests_to_stdout() {
     elif [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
         # if there's no entrypoint function, we assume the entrypoint file
         # runs actual code and that can cause problems during tests
-        bgen_import "$entrypoint_file" || { check && true; }
+        local err=0
+        bgen_import "$entrypoint_file" || err=$?
+        if ((err != 200)); then
+            return $err
+        fi
     fi
 
     for test_file in "${test_files[@]}"; do
         [[ -f "$test_file" ]] || continue
 
-        bgen_import "$test_file" || { check && true; }
+        local err=0
+        bgen_import "$test_file" || err=$?
+        if ((err != 200)); then
+            return $err
+        fi
     done
 
     if ((${#test_funcs[@]})); then
