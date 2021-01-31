@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
 
-bgen:import utils
-bgen:import lib/meta
-bgen:import lib/build
+bgen:import utils.sh
+bgen:import lib/meta.sh
+bgen:import lib/build.sh
+
 bgen:import barg
+bgen:import butl/log
 
 command_build() {
     barg.arg print_source \
         --short=p \
         --long=print-source \
         --desc "Print test script's source code instead of executing it."
+    barg.arg minify \
+        --short=m \
+        --long=minify \
+        --desc "Minify using shfmt if available."
 
     local print_source=
+    local minify=0
     barg.parse "$@"
+
+    if ((minify)) && ! command -v shfmt >/dev/null 2>/dev/null; then
+        butl.log_warning "shfmt command not found, minifying will be disabled"
+
+        minify=0
+    fi
 
     # set a constant seed to have consistent builds
     RANDOM=42
@@ -50,10 +63,12 @@ command_build() {
 build_library_file() {
     local file="$1"
 
-    if [[ "${shebang_string:-}" ]]; then
-        printf '%s\n\n' "$shebang_string"
+    echo_shebang
+    if ((minify)); then
+        process_file "$file" | shfmt -mn
+    else
+        process_file "$file"
     fi
-    process_file "$file"
 }
 
 build_library() {
@@ -115,7 +130,18 @@ build_project() {
 build_file() {
     local entrypoint=$1
 
-    echo_header
-    process_file "$entrypoint"
-    echo_entrypoint_call
+    echo_shebang
+
+    local output
+    output=$(
+        echo_header
+        process_file "$entrypoint"
+        echo_entrypoint_call
+    )
+
+    if ((minify)); then
+        echo "$output" | shfmt -mn
+    else
+        echo "$output"
+    fi
 }

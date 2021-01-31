@@ -1,18 +1,6 @@
 #!/usr/bin/env bash
 
-# Exit on error. Append "|| true" if you expect an error.
-set -o errexit
-# Exit on error inside any functions or subshells.
-set -o errtrace
-# Catch the error in case mysqldump fails (but gzip succeeds) in $(mysqldump | gzip)
-set -o pipefail
-# Do not allow use of undefined vars. Use ${VAR:-} to use an undefined VAR
-set -o nounset
-
-# TODO: use nounset only on bash 4.4+? earlier versions also complain when expanding empty arrays
-# if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4))); then
-# set -o nounset
-# fi
+set -o errexit -o errtrace -o pipefail -o nounset
 
 # check whether script is source or directly executed
 if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then

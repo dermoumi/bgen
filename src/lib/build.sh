@@ -3,19 +3,20 @@
 bgen:import butl/vars
 bgen:import butl/arrays
 
+echo_shebang() {
+    if [[ "${shebang_string:-}" ]]; then
+        printf '%s\n\n' "$shebang_string"
+    fi
+}
+
 echo_header() {
     local header_file=${header_file:-}
     if [[ -f "$header_file" ]]; then
-        if [[ "${shebang_string:-}" ]]; then
-            printf '%s\n\n' "$shebang_string"
-        fi
-
         process_file "$header_file"
     else
         local default_header
         bgen:include_str default_header ../header.sh
-
-        echo "$default_header"
+        process_input <<<"$default_header"
     fi
 
     # Add some spacing
