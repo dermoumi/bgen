@@ -96,12 +96,12 @@ __bgen_test_entrypoint() {
 
         # exit with error if any test failed
         if ((${#failed_tests_funcs[@]})); then
-            printf '\n%b%s/%s passed successfully%b\n' \
-                "$__BGEN_TEST_COL_DANGER" "$passed_test_count" "$n_tests" "$__BGEN_TEST_COL_RESET"
+            printf '\n%b%s/%s passed failed%b\n' \
+                "$__BGEN_TEST_COL_DANGER" $((total_test_count - passed_test_count)) "$n_tests" "$__BGEN_TEST_COL_RESET"
             exit 1
         else
-            printf '\n%b%s passed successfully %s%b\n' \
-                "$__BGEN_TEST_COL_SUCCESS" "$n_tests" "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_RESET"
+            printf '\n%s\n%b%s passed successfully%b\n' \
+                "☆*･゜ﾟ･*(^O^)/*･゜ﾟ･*☆" "$__BGEN_TEST_COL_SUCCESS" "$n_tests" "$__BGEN_TEST_COL_RESET"
         fi
     fi
 }
@@ -347,6 +347,19 @@ __bgen_is_line_covered() {
         return 0
     fi
 
+    if [[ "$line" =~ ([^\\]|^)\\$ ]]; then
+        # lines ends with backslash
+        pending_lines=$((pending_lines + 1))
+        skip_line=1
+
+        if ((coverage_map[line_nr])); then
+            # It is also covered, so we mark the next line as covered instead
+            coverage_map[$((line_nr + 1))]=${coverage_map[line_nr]}
+        fi
+
+        return 1
+    fi
+
     if ((coverage_map[line_nr])); then
         # line is in the coverage map
         return 0
@@ -359,16 +372,30 @@ __bgen_is_line_covered() {
         return
     fi
 
+    if [[ "$line" =~ ^[[:space:]]*else[[:space:]]*$ ]]; then
+        # line is an else statement
+        pending_lines=$((pending_lines + 1))
+        skip_line=1
+        return 1
+    fi
+
     if [[ "$line" =~ ^[[:space:]]*\# ]]; then
         # line is a comment
         # covered only if the previous line also covered
-        ((${is_prev_line_covered-}))
-        return
+        pending_lines=$((pending_lines + 1))
+        skip_line=1
+        return 1
     fi
 
     if [[ "$line" =~ ^[[:space:]]*(\(|\{|\)|\}|do|done|then|fi)[[:space:]]*$ ]]; then
         # line is a single curly brace or parenthesis
         # covered only if the previous line also covered
+        ((${is_prev_line_covered-}))
+        return
+    fi
+
+    if [[ "$line" =~ ^[[:space:]]*done[[:space:]]*\< ]]; then
+        # line is done statement followed by a redirection
         ((${is_prev_line_covered-}))
         return
     fi
@@ -492,10 +519,6 @@ __bgen_test_add_file_report() {
             fi
 
             exhunks=("${newhunks[@]}")
-
-            if ((placed)); then
-                break
-            fi
         done
 
         : "$(printf ',%s' "${newhunks[@]}")"
@@ -821,22 +844,13 @@ __bgen_test_parse_coverage_map() {
             continue
         fi
 
-        # lines ending with backslash
-        if [[ "$line" =~ ([^\\]|^)\\$ ]]; then
-            pending_lines=$((pending_lines + 1))
-            continue
-        fi
-
-        # lines that only contain 'else' depend on the next line to be covered
-        if [[ "$line" == "else" ]]; then
-            pending_lines=$((pending_lines + 1))
-            continue
-        fi
-
         if [[ "$current_file" ]]; then
+            local skip_line=0
             if __bgen_is_line_covered "$line_nr" "$line"; then
                 __bgen_test_extend_coverage_hunk
                 is_prev_line_covered=1
+            elif ((skip_line)); then
+                continue
             else
                 __bgen_test_close_coverage_hunk
                 is_prev_line_covered=0
@@ -1123,8 +1137,8 @@ __bgen_test_run_single() {
         printf "%b.%b" "$__BGEN_TEST_COL_SUCCESS" "$__BGEN_TEST_COL_RESET"
     fi
 
-    : "${BGEN_CAPTURE:=}"
-    if ((err == 0 && BGEN_CAPTURE != 0)); then
+    : "${BGEN_NO_CAPTURE:=}"
+    if ((err == 0 && BGEN_NO_CAPTURE == 0)); then
         return
     fi
 

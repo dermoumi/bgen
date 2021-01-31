@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 bgen:import butl/vars
+bgen:import butl/arrays
 
 echo_header() {
     local header_file=${header_file:-}
@@ -164,7 +165,7 @@ bgen_import() {
     file=$(find_source_file "$1")
 
     # Don't re-import file if it was already imported
-    if butl.is_in_array "$file" "${imported_files[@]-}"; then
+    if butl.index_of "$file" "${imported_files[@]-}"; then
         echo "# BGEN__ALREADY_IMPORTED $file"
     else
         # Mark file as imported

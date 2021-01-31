@@ -30,6 +30,7 @@ run_project_tests() {
         --env=BGEN_COVERAGE_EXPERIMENTAL \
         --desc "Enable experimental code coverage features."
     barg.arg coverage_debug \
+        --implies=no_capture \
         --implies=coverage \
         --short=D \
         --long=coverage-debug \

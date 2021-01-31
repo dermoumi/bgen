@@ -74,9 +74,16 @@ assert_exits_with() {
 
         # Working around bash 4.2 and 4.3 not returning the correct exit code of subprocesses
         err=$(
-            "${args[@]}" 1>"$stdout_file" 2>"$stderr_file"
-            echo $?
-        )
+            trap '__bgen_test_debug_handler "$?" "$LINENO" "$BASH_COMMAND" "$_"' DEBUG
+            trap 'trap - DEBUG; __bgen_test_error_handler "$LINENO"' ERR
+            trap 'trap - DEBUG; __bgen_test_exit_handler "$LINENO"' EXIT
+
+            "${args[@]}" 1>"$stdout_file" 2>"$stderr_file" || echo $?
+        ) || err=$?
+
+        if [[ ! "$err" ]]; then
+            err=0
+        fi
 
         local stdout
         stdout=$(<"$stdout_file")
@@ -97,15 +104,23 @@ assert_exits_with() {
     fi
 
     if [[ "${__bgen_assert_stdout+x}" ]] && [[ "$__bgen_assert_stdout" != "$stdout" ]]; then
-        report+=("$(printf "expected stdout: %s\nreturned stdout: %s\n" "$__bgen_assert_stdout" "$stdout")")
+        report+=("$(
+            printf "expected stdout: %s\nreturned stdout: %s\n" \
+                "$(cat -vte <<<"$__bgen_assert_stdout")" \
+                "$(cat -vte <<<"$stdout")"
+        )")
     fi
 
     if [[ "${__bgen_assert_stderr+x}" ]] && [[ "$__bgen_assert_stderr" != "$stderr" ]]; then
-        report+=("$(printf "expected stderr: %s\nreturned stderr: %s\n" "$__bgen_assert_stderr" "$stderr")")
+        report+=("$(
+            printf "expected stderr: %s\nreturned stderr: %s\n" \
+                "$(cat -vte <<<"$__bgen_assert_stderr")" \
+                "$(cat -vte <<<"$stderr")"
+        )")
     fi
 
     if ((${#report[@]})); then
-        printf 'assert_exits_with failed:\n' >&2
+        printf 'assert_exits_with failed on %s:\n' "${args[*]}" >&2
         printf '%s\n' "${report[@]}" >&2
 
         # save line at which this happened, used later for reporting
