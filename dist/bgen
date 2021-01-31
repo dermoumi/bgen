@@ -203,14 +203,14 @@ if [[ -f $header_file ]];then
 process_file "$header_file"
 else
 local default_header
-read -rd '' default_header <<-"BGEN_EOF_23432_19018"||:
+read -rd '' default_header <<-"BGEN_EOF_14159_20440"||:
 			#!/usr/bin/env bash
 			
 			set -o errexit -o errtrace -o pipefail -o nounset
 			
 			LOG_LEVEL="${LOG_LEVEL:-6}" # 7 = debug -> 0 = emergency
 			NO_COLOR="${NO_COLOR:-}"
-			BGEN_EOF_23432_19018
+			BGEN_EOF_14159_20440
 process_input <<<"$default_header"
 fi
 printf '\n\n'
@@ -1387,7 +1387,7 @@ if ((minify))&&! command -v shfmt >/dev/null 2>/dev/null;then
 butl.log_warning "shfmt command not found, minifying will be disabled"
 minify=0
 fi
-RANDOM=42
+export RANDOM=42
 local imported_files=()
 local header_file=
 local entrypoint_func=
@@ -1639,7 +1639,7 @@ echo "BGEN_COVERAGE_EXPERIMENTAL=$coverage_experimental"
 echo "BGEN_COVERAGE_DEBUG=$coverage_debug"
 printf "BGEN_HTML_REPORT_FILE=%q\n\n" "$coverage_file"
 local assertlib
-read -rd '' assertlib <<-"BGEN_EOF_17295_22091"||:
+read -rd '' assertlib <<-"BGEN_EOF_7192_18625"||:
 		#!/usr/bin/env bash
 		# shellcheck disable=SC2034
 		
@@ -1774,10 +1774,10 @@ read -rd '' assertlib <<-"BGEN_EOF_17295_22091"||:
 		    return 0
 		}
 		export -f assert_exits_with
-		BGEN_EOF_17295_22091
+		BGEN_EOF_7192_18625
 process_input <<<"$assertlib"
 local bootstrap
-read -rd '' bootstrap <<-"BGEN_EOF_16111_21757"||:
+read -rd '' bootstrap <<-"BGEN_EOF_12662_5886"||:
 		#!/usr/bin/env bash
 		
 		__bgen_test_entrypoint() {
@@ -3095,7 +3095,7 @@ read -rd '' bootstrap <<-"BGEN_EOF_16111_21757"||:
 		EOF
 		
 		__bgen_test_entrypoint "$@"
-		BGEN_EOF_16111_21757
+		BGEN_EOF_12662_5886
 process_input <<<"$bootstrap"
 }
 bgen(){

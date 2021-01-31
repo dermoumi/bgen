@@ -27,9 +27,6 @@ command_build() {
         minify=0
     fi
 
-    # set a constant seed to have consistent builds
-    RANDOM=42
-
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in
     # shellcheck disable=2034
@@ -62,6 +59,9 @@ command_build() {
 
 build_library_file() {
     local file="$1"
+
+    # set a constant seed to have consistent builds
+    RANDOM=42
 
     echo_shebang
     if ((minify)); then
@@ -134,6 +134,9 @@ build_file() {
 
     local output
     output=$(
+        # set a constant seed to have consistent builds
+        RANDOM=42
+
         echo_header
         process_file "$entrypoint"
         echo_entrypoint_call
