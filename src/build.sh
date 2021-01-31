@@ -3,6 +3,23 @@
 bgen:import utils
 bgen:import lib/meta
 bgen:import lib/build
+bgen:import barg
+
+command_build() {
+    barg.arg print_source \
+        --short=p \
+        --long=print-source \
+        --desc "Print test script's source code instead of executing it."
+
+    local print_source=
+    barg.parse "$@"
+
+    if ((print_source)); then
+        build_project_to_stdout
+    else
+        build_project
+    fi
+}
 
 build_project() {
     # save it in a temp file first

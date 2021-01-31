@@ -3,7 +3,7 @@
 bgen:import lib/meta
 bgen:import lib/build
 
-run_project_tests() {
+command_test() {
     barg.arg test_files \
         --multi \
         --value=FILE \
@@ -46,7 +46,7 @@ run_project_tests() {
     barg.arg print_source \
         --short=p \
         --long=print-source \
-        --desc "Print test script's source code instead of executing it"
+        --desc "Print test script's source code instead of executing it."
 
     local test_files=()
     local test_funcs=()
