@@ -72,31 +72,35 @@ build_library_file() {
 }
 
 build_library() {
-    if shopt -qs extglob; then
-        local keep_extglob=1
+    if shopt -qs globstar; then
+        local keep_globstar=1
     fi
 
-    shopt -s extglob
+    shopt -s globstar
     for file in "${source_dir%/}"/**/*.sh; do
         # If we have the same path as the query, then we got no file
         if [[ "$file" == "${source_dir%/}/**/*.sh" ]]; then
+            echo "broke free" >&2
             break
         fi
 
         # ignore files that start with an underscore
-        if [[ "$file" == _* ]]; then
+        if [[ "${file##*/}" == _* ]]; then
             continue
         fi
 
-        local output_file="${output_dir%/}/${file%%$source_dir}"
+        local output_file="${output_dir%/}/${file##$source_dir\/}"
         mkdir -p "${output_file%/*}"
 
         build_library_file "$file" >"$output_file"
+        butl.log_info "Built: $output_file"
     done
 
-    if ! ((keep_extglob)); then
-        shopt -u extglob
+    if ! ((keep_globstar)); then
+        shopt -u globstar
     fi
+
+    butl.log_notice "Done"
 }
 
 build_project() {
@@ -125,6 +129,9 @@ build_project() {
     # copy it to the real output dir and make it executable
     cp "$tmp_file" "$output_file"
     chmod +x "$output_file"
+    butl.log_info "Built: $output_file"
+
+    butl.log_notice "Done"
 }
 
 build_file() {

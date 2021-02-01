@@ -58,6 +58,21 @@ command_test() {
     local print_source=
     barg.parse "$@"
 
+    # shellcheck disable=2034
+    local project_root=
+    # shellcheck disable=2034
+    local header_file=
+    # shellcheck disable=2034
+    local shebang_string=
+    # shellcheck disable=2034
+    local import_paths=
+    local tests_dir=
+    local entrypoint_file=
+    local entrypoint_func=
+    local source_dir=
+    local is_library=
+    read_project_meta
+
     # check whether bgen is sourced or directly executed
     local process process_dir process_file process_base
     if [[ "${__BGEN_PIPE_SOURCE__:-}" ]]; then
@@ -97,21 +112,6 @@ build_tests_to_stdout() {
     # shellcheck disable=2034
     local imported_files=()
 
-    # shellcheck disable=2034
-    local project_root=
-    # shellcheck disable=2034
-    local header_file=
-    # shellcheck disable=2034
-    local shebang_string=
-    # shellcheck disable=2034
-    local import_paths=
-    local tests_dir=
-    local entrypoint_file=
-    local entrypoint_func=
-    local source_dir=
-    local is_library=
-    read_project_meta
-
     local test_files=()
     if ! ((${#targets[@]})); then
         # make sure tests directory exists
@@ -137,11 +137,11 @@ build_tests_to_stdout() {
 
     # pre-including the project for tests to have better coverage reports
     if ((is_library)); then
-        if shopt -qs extglob; then
-            local keep_extglob=1
+        if shopt -qs globstar; then
+            local keep_globstar=1
         fi
 
-        shopt -s extglob
+        shopt -s globstar
         for file in "${source_dir%/}"/**/*.sh; do
             # If we have the same path as the query, then we got no file
             if [[ "$file" == "${source_dir%/}/**/*.sh" ]]; then
@@ -149,23 +149,23 @@ build_tests_to_stdout() {
             fi
 
             # ignore files that start with an underscore
-            if [[ "$file" == _* ]]; then
+            if [[ "${file##*/}" == _* ]]; then
                 continue
             fi
 
             local err=0
             bgen_import "$file" || err=$?
             if ((err != 200)); then
-                if ! ((keep_extglob)); then
-                    shopt -u extglob
+                if ! ((keep_globstar)); then
+                    shopt -u globstar
                 fi
 
                 return $err
             fi
         done
 
-        if ! ((keep_extglob)); then
-            shopt -u extglob
+        if ! ((keep_globstar)); then
+            shopt -u globstar
         fi
     elif [[ "$entrypoint_func" && -s "$entrypoint_file" ]]; then
         # if there's no entrypoint function, we assume the entrypoint file

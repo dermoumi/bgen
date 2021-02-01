@@ -1418,24 +1418,27 @@ process_file "$file"
 fi
 }
 build_library(){
-if shopt -qs extglob;then
-local keep_extglob=1
+if shopt -qs globstar;then
+local keep_globstar=1
 fi
-shopt -s extglob
+shopt -s globstar
 for file in "${source_dir%/}"/**/*.sh;do
 if [[ $file == "${source_dir%/}/**/*.sh" ]];then
+echo "broke free" >&2
 break
 fi
-if [[ $file == _* ]];then
+if [[ ${file##*/} == _* ]];then
 continue
 fi
-local output_file="${output_dir%/}/${file%%$source_dir}"
+local output_file="${output_dir%/}/${file##$source_dir\/}"
 mkdir -p "${output_file%/*}"
 build_library_file "$file" >"$output_file"
+butl.log_info "Built: $output_file"
 done
-if ! ((keep_extglob));then
-shopt -u extglob
+if ! ((keep_globstar));then
+shopt -u globstar
 fi
+butl.log_notice "Done"
 }
 build_project(){
 local tmp_file
@@ -1451,6 +1454,8 @@ mkdir -p "$output_dir"
 fi
 cp "$tmp_file" "$output_file"
 chmod +x "$output_file"
+butl.log_info "Built: $output_file"
+butl.log_notice "Done"
 }
 build_file(){
 local entrypoint=$1
@@ -1555,6 +1560,16 @@ local coverage_debug=
 local coverage_file=
 local print_source=
 barg.parse "$@"
+local project_root=
+local header_file=
+local shebang_string=
+local import_paths=
+local tests_dir=
+local entrypoint_file=
+local entrypoint_func=
+local source_dir=
+local is_library=
+read_project_meta
 local process process_dir process_file process_base
 if [[ "${__BGEN_PIPE_SOURCE__:-}" ]];then
 process="$__BGEN_PIPE_SOURCE__"
@@ -1580,16 +1595,6 @@ fi
 }
 build_tests_to_stdout(){
 local imported_files=()
-local project_root=
-local header_file=
-local shebang_string=
-local import_paths=
-local tests_dir=
-local entrypoint_file=
-local entrypoint_func=
-local source_dir=
-local is_library=
-read_project_meta
 local test_files=()
 if ! ((${#targets[@]}));then
 if ! [[ -d $tests_dir ]];then
@@ -1609,28 +1614,28 @@ fi
 echo_shebang
 echo_header
 if ((is_library));then
-if shopt -qs extglob;then
-local keep_extglob=1
+if shopt -qs globstar;then
+local keep_globstar=1
 fi
-shopt -s extglob
+shopt -s globstar
 for file in "${source_dir%/}"/**/*.sh;do
 if [[ $file == "${source_dir%/}/**/*.sh" ]];then
 break
 fi
-if [[ $file == _* ]];then
+if [[ ${file##*/} == _* ]];then
 continue
 fi
 local err=0
 bgen_import "$file"||err=$?
 if ((err!=200));then
-if ! ((keep_extglob));then
-shopt -u extglob
+if ! ((keep_globstar));then
+shopt -u globstar
 fi
 return $err
 fi
 done
-if ! ((keep_extglob));then
-shopt -u extglob
+if ! ((keep_globstar));then
+shopt -u globstar
 fi
 elif [[ $entrypoint_func && -s $entrypoint_file ]];then
 local err=0
