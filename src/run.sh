@@ -45,10 +45,10 @@ command_run() {
 
 run_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} run"
-    bash -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
+    bash -c "$(build_file "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }
 
 debug_project() {
     export __BGEN_PIPE_SOURCE__="${__base__:-$0} debug"
-    bash -x -c "$(build_project_to_stdout "$entrypoint_file")" "${__base__:-$0} run" "$@"
+    bash -x -c "$(build_file "$entrypoint_file")" "${__base__:-$0} run" "$@"
 }

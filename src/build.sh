@@ -64,7 +64,7 @@ build_library_file() {
     RANDOM=42
 
     echo_shebang
-    if ((minify)); then
+    if ((${minify:-})); then
         process_file "$file" | shfmt -mn
     else
         process_file "$file"
@@ -149,7 +149,7 @@ build_file() {
         echo_entrypoint_call
     )
 
-    if ((minify)); then
+    if ((${minify:-})); then
         echo "$output" | shfmt -mn
     else
         echo "$output"
