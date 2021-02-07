@@ -430,7 +430,7 @@ butl.die() {
 }
 # BGEN__END /home/sdrm/projects/butl/lib/butl/log.sh
 
-# BGEN__BEGIN /home/sdrm/projects/barg/lib/parse.sh
+# BGEN__BEGIN /home/sdrm/projects/barg/lib/barg/_parse.sh
 # BGEN__SHEBANG_REMOVED
 
 # Parses arguments looking for a subcommand
@@ -1036,8 +1036,8 @@ __barg_postprocess_args() {
         fi
     done
 }
-# BGEN__END /home/sdrm/projects/barg/lib/parse.sh
-# BGEN__BEGIN /home/sdrm/projects/barg/lib/usage.sh
+# BGEN__END /home/sdrm/projects/barg/lib/barg/_parse.sh
+# BGEN__BEGIN /home/sdrm/projects/barg/lib/barg/_usage.sh
 # BGEN__SHEBANG_REMOVED
 
 # BGEN__BEGIN /home/sdrm/projects/butl/lib/butl/columns.sh
@@ -1498,7 +1498,7 @@ __barg_print_args() {
         printf '\t %s\n' "$_"
     done
 }
-# BGEN__END /home/sdrm/projects/barg/lib/usage.sh
+# BGEN__END /home/sdrm/projects/barg/lib/barg/_usage.sh
 
 # shellcheck disable=SC2034
 : "${__barg_style_title:="${BUTL_ANSI_RESET}${BUTL_ANSI_YELLOW}"}"
@@ -4153,7 +4153,20 @@ command_install() {
         return "$should_exit_err"
     fi
 
-    echo hi
+    if ! type -p bpkg >/dev/null 2>&1; then
+        echo "bpkg is not installed"
+    fi
+
+    bpkg_cmd="bpkg"
+
+    local build_deps=()
+    read_project_meta
+
+    for dep in "${build_deps[@]}"; do
+        butl.log_info "Installing $dep"
+
+        "$bpkg_cmd" install "$dep"
+    done
 }
 # BGEN__END /home/sdrm/projects/bgen/src/install.sh
 

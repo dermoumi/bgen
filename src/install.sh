@@ -10,5 +10,19 @@ command_install() {
         return "$should_exit_err"
     fi
 
-    echo hi
+    if ! type -p bpkg >/dev/null 2>&1; then
+        butl.fail "bpkg is not installed"
+        return
+    fi
+
+    bpkg_cmd="bpkg"
+
+    local build_deps=()
+    read_project_meta
+
+    for dep in "${build_deps[@]}"; do
+        butl.log_info "Installing $dep"
+
+        "$bpkg_cmd" install "$dep"
+    done
 }

@@ -6,6 +6,6 @@ project_name="bgen"
 
 # build dependencies
 build_deps=(
-    "dermoumi/butl"
     "dermoumi/barg"
+    # "dermoumi/butl" # installed as part of barg
 )

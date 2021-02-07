@@ -3,7 +3,7 @@
     "version": "0.0.1",
     "description": "utility to build bash scripts",
     "scripts": [
-        "bin/bgen"
+        "dist/bgen"
     ],
     "files": [
         "LICENSE",
