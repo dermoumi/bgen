@@ -11,8 +11,11 @@ command_install() {
     fi
 
     if ! type -p bpkg >/dev/null 2>&1; then
-        butl.fail "bpkg is not installed"
-        return
+        bpkg_cmd="$HOME/.cache/bpkg/bin/bpkg"
+
+        if [[ ! -x "$bpkg_cmd" ]]; then
+            install_bpkg || return
+        fi
     fi
 
     bpkg_cmd="bpkg"
@@ -26,3 +29,10 @@ command_install() {
         "$bpkg_cmd" install "$dep"
     done
 }
+
+install_bpkg() (
+    export PREFIX="$HOME/.cache/bpkg/"
+
+    mkdir -p "$PREFIX"
+    curl -Lo- "https://raw.githubusercontent.com/bpkg/bpkg/master/setup.sh" | bash
+)
