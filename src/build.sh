@@ -46,6 +46,8 @@ command_build() {
     local shebang_string=
     # shellcheck disable=2034
     local import_paths=
+    # shellcheck disable=2034
+    local project_root=
     local entrypoint_file=
     local is_library=
     local source_dir=

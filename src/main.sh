@@ -24,5 +24,9 @@ bgen() {
         return "$should_exit_err"
     fi
 
-    "$subcommand" "${subcommand_args[@]}"
+    if ((${#subcommand_args[@]})); then
+        "$subcommand" "${subcommand_args[@]}"
+    else
+        "$subcommand"
+    fi
 }

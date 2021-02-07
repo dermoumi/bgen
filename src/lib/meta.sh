@@ -25,7 +25,6 @@ read_project_meta() {
     output_dir="dist"
 
     local import_paths_extra=()
-    import_paths=()
     import_paths=("deps/*/lib")
 
     # source config file

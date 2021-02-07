@@ -135,12 +135,12 @@ find_file() {
     # check in import directories
     # shellcheck disable=SC2154
     for unexpanded_dir in "${import_paths[@]}"; do
-        for dir in $unexpanded_dir; do
-            # make sure external files are always imported relative to project dir
-            if [[ "$dir" != /* ]]; then
-                dir="${project_root:-$PWD}/$dir"
-            fi
+        # make sure external files are always imported relative to project dir
+        if [[ "$unexpanded_dir" != /* ]]; then
+            unexpanded_dir="${project_root:-$PWD}/$unexpanded_dir"
+        fi
 
+        for dir in $unexpanded_dir; do
             if [[ -r "$dir/$file" && -f "$dir/$file" ]]; then
                 realpath "$dir/$file"
                 return

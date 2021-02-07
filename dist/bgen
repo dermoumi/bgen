@@ -685,7 +685,7 @@ barg.parse() {
 
         if [[ "${__barg_catchall_arg:-}" ]]; then
             local var_arg_allow_dash="__barg_arg_${__barg_catchall_arg}_allow_dash"
-            local arg_allow_dash=${!var_arg_allow_dash}
+            local arg_allow_dash=${!var_arg_allow_dash:-}
 
             if [[ "$arg" == -?* ]]; then
                 if ((process_args_only || arg_allow_dash)); then
@@ -1906,7 +1906,6 @@ read_project_meta() {
     output_dir="dist"
 
     local import_paths_extra=()
-    import_paths=()
     import_paths=("deps/*/lib")
 
     # source config file
@@ -2140,12 +2139,12 @@ find_file() {
     # check in import directories
     # shellcheck disable=SC2154
     for unexpanded_dir in "${import_paths[@]}"; do
-        for dir in $unexpanded_dir; do
-            # make sure external files are always imported relative to project dir
-            if [[ "$dir" != /* ]]; then
-                dir="${project_root:-$PWD}/$dir"
-            fi
+        # make sure external files are always imported relative to project dir
+        if [[ "$unexpanded_dir" != /* ]]; then
+            unexpanded_dir="${project_root:-$PWD}/$unexpanded_dir"
+        fi
 
+        for dir in $unexpanded_dir; do
             if [[ -r "$dir/$file" && -f "$dir/$file" ]]; then
                 realpath "$dir/$file"
                 return
@@ -2273,6 +2272,8 @@ command_build() {
     local shebang_string=
     # shellcheck disable=2034
     local import_paths=
+    # shellcheck disable=2034
+    local project_root=
     local entrypoint_file=
     local is_library=
     local source_dir=
@@ -2433,6 +2434,8 @@ command_run() {
     local import_paths=
     # shellcheck disable=2034
     local entrypoint_file=
+    # shellcheck disable=2034
+    local project_root=
     local is_library=
     read_project_meta
 
@@ -4153,11 +4156,10 @@ command_install() {
         return "$should_exit_err"
     fi
 
+    PATH="$HOME/.cache/bpkg/bin:$PATH"
     if ! type -p bpkg >/dev/null 2>&1; then
-        echo "bpkg is not installed"
+        install_bpkg || return
     fi
-
-    bpkg_cmd="bpkg"
 
     local build_deps=()
     read_project_meta
@@ -4165,9 +4167,16 @@ command_install() {
     for dep in "${build_deps[@]}"; do
         butl.log_info "Installing $dep"
 
-        "$bpkg_cmd" install "$dep"
+        bpkg-install "$dep"
     done
 }
+
+install_bpkg() (
+    export PREFIX="$HOME/.cache/bpkg/"
+
+    mkdir -p "$PREFIX"
+    curl -Lo- "https://raw.githubusercontent.com/bpkg/bpkg/master/setup.sh" | bash
+)
 # BGEN__END /home/sdrm/projects/bgen/src/install.sh
 
 # entrypoint
@@ -4187,7 +4196,11 @@ bgen() {
         return "$should_exit_err"
     fi
 
-    "$subcommand" "${subcommand_args[@]}"
+    if ((${#subcommand_args[@]})); then
+        "$subcommand" "${subcommand_args[@]}"
+    else
+        "$subcommand"
+    fi
 }
 
 [[ "${BASH_SOURCE+x}" && "${BASH_SOURCE[0]}" != "${0}" ]] || bgen "$@"

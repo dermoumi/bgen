@@ -10,15 +10,10 @@ command_install() {
         return "$should_exit_err"
     fi
 
+    PATH="$HOME/.cache/bpkg/bin:$PATH"
     if ! type -p bpkg >/dev/null 2>&1; then
-        bpkg_cmd="$HOME/.cache/bpkg/bin/bpkg"
-
-        if [[ ! -x "$bpkg_cmd" ]]; then
-            install_bpkg || return
-        fi
+        install_bpkg || return
     fi
-
-    bpkg_cmd="bpkg"
 
     local build_deps=()
     read_project_meta
@@ -26,7 +21,7 @@ command_install() {
     for dep in "${build_deps[@]}"; do
         butl.log_info "Installing $dep"
 
-        "$bpkg_cmd" install "$dep"
+        bpkg-install "$dep"
     done
 }
 

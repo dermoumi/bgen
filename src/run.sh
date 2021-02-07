@@ -37,6 +37,8 @@ command_run() {
     local import_paths=
     # shellcheck disable=2034
     local entrypoint_file=
+    # shellcheck disable=2034
+    local project_root=
     local is_library=
     read_project_meta
 
