@@ -1,18 +1,28 @@
 #!/usr/bin/env bash
 
+bgen:import barg
+
 bgen:import build.sh
 bgen:import run.sh
 bgen:import tests.sh
-bgen:import barg
+bgen:import install.sh
 
 # entrypoint
 bgen() {
     barg.subcommand build command_build "builds the project"
     barg.subcommand run command_run "runs the project"
     barg.subcommand test command_test "runs tests"
+    barg.subcommand install command_install "install project dependencies"
 
     local subcommand=
-    barg.parse "$@"
+    local subcommand_args=()
 
-    "${subcommand[@]}"
+    local should_exit=
+    local should_exit_err=0
+    barg.parse "$@"
+    if ((should_exit)); then
+        return "$should_exit_err"
+    fi
+
+    "$subcommand" "${subcommand_args[@]}"
 }

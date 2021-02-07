@@ -19,7 +19,13 @@ command_build() {
 
     local print_source=
     local minify=0
+
+    local should_exit=
+    local should_exit_err=0
     barg.parse "$@"
+    if ((should_exit)); then
+        return "$should_exit_err"
+    fi
 
     if ((minify)) && ! command -v shfmt >/dev/null 2>/dev/null; then
         butl.log_warning "shfmt command not found, minifying will be disabled"
@@ -47,10 +53,14 @@ command_build() {
     read_project_meta
 
     if ((is_library)); then
-        build_library
+        if ((print_source)); then
+            build_library_file "$file"
+        else
+            build_library
+        fi
     else
         if ((print_source)); then
-            build_project_to_stdout
+            build_file "$entrypoint_file"
         else
             build_project
         fi

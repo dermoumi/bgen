@@ -14,7 +14,13 @@ command_run() {
 
     local debug=
     local args=()
+
+    local should_exit=
+    local should_exit_err=0
     barg.parse "$@"
+    if ((should_exit)); then
+        return "$should_exit_err"
+    fi
 
     # used later to keep track of whether a file was imported or not
     # declared here to be on the biggest private scope it's needed in

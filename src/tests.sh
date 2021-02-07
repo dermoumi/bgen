@@ -56,7 +56,13 @@ command_test() {
     local coverage_debug=
     local coverage_file=
     local print_source=
+
+    local should_exit=
+    local should_exit_err=0
     barg.parse "$@"
+    if ((should_exit)); then
+        return "$should_exit_err"
+    fi
 
     # shellcheck disable=2034
     local project_root=
